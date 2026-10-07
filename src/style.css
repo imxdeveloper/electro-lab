@@ -214,6 +214,7 @@ button, input, select {
 .chip-node-header-square { fill: inherit; }
 .chip-node-type { fill: #adc0d6; font: 700 8px var(--font-mono); letter-spacing: .06em; pointer-events: none; }
 .chip-node-label { fill: #edf3fa; font: 11px var(--font-ui); pointer-events: none; }
+.chip-node-note { fill: #a7b7cb; font: 8px var(--font-ui); pointer-events: none; }
 .chip-gate-mark,.chip-pin-label,.chip-value-text { fill: #8294aa; font: 8px var(--font-mono); text-anchor: middle; pointer-events: none; }
 .chip-pin-label { text-anchor: start; font-size: 7px; }
 .chip-pin-label.output-label { text-anchor: end; }
@@ -230,6 +231,9 @@ button, input, select {
 .chip-value-lamp.unknown { fill: #dc9d4c; }
 .chip-value-text { fill: #dce5ef; text-anchor: start; }
 .chip-wire { fill: none; stroke: #65758a; stroke-width: 2; pointer-events: none; }
+.chip-wire[marker-end] { marker-end: url(#chip-wire-arrow); }
+.chip-wire-group.selected .chip-wire[marker-end] { stroke: #86bbff; }
+.chip-wire-group.probed .chip-wire[marker-end] { stroke: #d4a8ff; }
 .chip-wire.high { stroke: #3ed48c; stroke-width: 2.5; filter: drop-shadow(0 0 3px #3ed48c88); }
 .chip-wire-group.probed .chip-wire { stroke: #d4a8ff; stroke-width: 3; filter: drop-shadow(0 0 3px #a879e988); }
 .chip-wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
@@ -266,7 +270,8 @@ button, input, select {
 .chip-component-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-component-symbol { display: grid; place-items: center; flex: 0 0 39px; height: 36px; border: 1px solid #4a5781; border-radius: 6px; background: #2b2c49; color: #c1b6ff; font: 700 9px var(--font-mono); }
 .chip-form-field { display: grid; gap: 6px; margin: 12px 0; color: #8c9cb0; font-size: 10px; }
-.chip-form-field input { width: 100%; padding: 7px 8px; border: 1px solid #35445a; border-radius: 5px; background: #101722; color: #e0e8f1; user-select: text; }
+.chip-form-field input,.chip-form-field textarea { width: 100%; padding: 7px 8px; border: 1px solid #35445a; border-radius: 5px; background: #101722; color: #e0e8f1; user-select: text; }
+.chip-form-field textarea { resize: vertical; font: 10px var(--font-ui); line-height: 1.5; }
 .chip-spec-list { display: grid; gap: 0; margin-top: 12px; }
 .chip-spec-list > div { display: flex; justify-content: space-between; gap: 8px; padding: 9px 1px; border-bottom: 1px solid #263244; }
 .chip-spec-list span { color: #8b9aae; font-size: 10px; }
@@ -289,6 +294,9 @@ button, input, select {
 .chip-sim-pin i { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: #58677b; }
 .chip-sim-pin i.high { background: #4bd28b; box-shadow: 0 0 7px #4bd28b; }.chip-sim-pin i.unknown { background: #dc9d4c; }
 .chip-sim-empty { padding: 7px 2px; color: #74849a; font-size: 10px; }
+.chip-watch-item { display: flex; justify-content: space-between; width: 100%; gap: 8px; margin: 4px 0; padding: 8px; border: 1px solid #385170; border-radius: 5px; background: #19283a; color: #c8d3e0; cursor: pointer; text-align: left; }
+.chip-watch-item span { overflow: hidden; color: #b3c3d7; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.chip-watch-item b { color: #82b4ed; font: 9px var(--font-mono); white-space: nowrap; }
 .chip-sim-metrics { display: grid; grid-template-columns: repeat(3,1fr); margin: 15px 0; border: 1px solid #2d3c50; border-radius: 5px; background: #192331; }
 .chip-sim-metrics div { display: grid; justify-items: center; gap: 5px; padding: 8px 2px; border-right: 1px solid #2d3c50; }
 .chip-sim-metrics div:last-child { border: 0; }.chip-sim-metrics span { color: #8191a6; font-size: 9px; }.chip-sim-metrics b { font: 12px var(--font-mono); }
@@ -334,6 +342,9 @@ button, input, select {
 .chip-testbench-modal footer button { padding: 7px 11px; border: 1px solid #35445a; border-radius: 5px; background: #202b3a; color: #c7d3e3; cursor: pointer; }
 .chip-testbench-modal footer .chip-testbench-clock { display: flex; align-items: center; gap: 5px; margin-right: auto; color: #9baabd; font-size: 10px; }
 .chip-testbench-modal footer .chip-testbench-clock input { accent-color: #69a5ff; }
+.chip-testbench-modal footer .chip-testbench-seed { display: flex; align-items: center; gap: 5px; color: #9baabd; font-size: 10px; }
+.chip-testbench-modal footer .chip-testbench-seed input { width: 96px; padding: 6px; }
+.chip-testbench-coverage { padding: 7px 2px; color: #82b4ed; font: 9px var(--font-mono); }
 .chip-testbench-modal [data-testbench-result] { min-height: 15px; margin-top: 9px; color: #68d99d; font: 10px var(--font-mono); }
 .chip-project-modal,.chip-fsm-modal { position: fixed; z-index: 2147483647; inset: 0; display: grid; place-items: center; background: #060a10bb; }
 .chip-project-modal[hidden],.chip-fsm-modal[hidden] { display: none; }
@@ -415,9 +426,11 @@ button, input, select {
 .chip-learning-layout article aside { margin-top: 18px; padding: 12px; border: 1px solid #354b66; border-radius: 6px; background: #1d2b3d; }
 .chip-learning-layout article aside strong { color: #91b9e6; font: 600 9px var(--font-mono); }
 .chip-learning-layout article aside p { margin-top: 6px; color: #a5b4c7; font-size: 10px; line-height: 1.6; }
+.chip-learning-layout article aside button { margin-top: 8px; padding: 6px 8px; border: 1px solid #405a79; border-radius: 4px; background: #233750; color: #c9e0fb; cursor: pointer; font-size: 10px; }
 .chip-learning-layout .chip-learning-result { margin-top: 16px; color: #73d6a0; font: 10px var(--font-mono); }
 .chip-learning-modal footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 12px; border-top: 1px solid #2d3c50; }
 .chip-learning-modal footer button { padding: 7px 11px; border: 1px solid #35445a; border-radius: 5px; background: #202b3a; color: #c7d3e3; cursor: pointer; }
+.chip-learning-modal footer [data-chip-action="next-learning-lesson"] { border-color: #40785e; background: #203d31; color: #b5f0cf; }
 .chip-diagnostics-section { margin-top: 15px; padding-top: 10px; border-top: 1px solid #2d3c50; }
 .chip-diagnostics-section > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 7px; color: #8b9aae; font: 600 9px var(--font-mono); letter-spacing: .07em; }
 .chip-diagnostics-section > header button { padding: 3px 6px; border: 1px solid #35445a; border-radius: 4px; background: #202b3a; color: #aebdd0; cursor: pointer; font: 9px var(--font-ui); letter-spacing: 0; }

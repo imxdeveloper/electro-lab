@@ -35,12 +35,13 @@ const SEQUENTIAL_TYPES = new Set(['DFF', 'SR_DFF', 'REGISTER', 'COUNTER', 'CLOCK
 const BUS_MASK = (width) => (1 << width) - 1;
 const HISTORY_LIMIT = 80;
 const LEARNING_PROGRESS_KEY = 'electroDesigner.chipLab.learningProgress';
+const LEARNING_STATS_KEY = 'electroDesigner.chipLab.learningStats';
 const LEARNING_LESSONS = [
-  { id: 'and-gate', title: '1 · First logic gate', objective: 'Build an AND gate: the output should be HIGH only when both inputs are HIGH.', hint: 'Connect two input pins to the AND gate, then wire its output to an output pin.' },
-  { id: 'half-adder', title: '2 · Add binary bits', objective: 'Build a half-adder with separate SUM and CARRY outputs.', hint: 'XOR produces the sum bit; AND produces the carry bit.' },
-  { id: 'bus-mux', title: '3 · Select a data bus', objective: 'Use SEL to choose between two 2-bit data buses.', hint: 'When SEL is LOW choose A; when HIGH choose B.' },
-  { id: 'decoder', title: '4 · Decode an address', objective: 'Create a 2-to-4 decoder with exactly one active output for each address.', hint: 'Connect A0 and A1 to the decoder input pins in least-significant-bit order.' },
-  { id: 'register', title: '5 · Store a value', objective: 'Capture a 2-bit bus in a clocked register and retain it until another edge.', hint: 'Connect BUS input to D and the clock source to CLK; then pulse the clock.' }
+  { id: 'and-gate', title: '1 · First logic gate', objective: 'Build an AND gate: the output should be HIGH only when both inputs are HIGH.', hints: ['Connect both input pins to the two AND inputs.', 'Connect the AND output to the output pin.'] },
+  { id: 'half-adder', title: '2 · Add binary bits', objective: 'Build a half-adder with separate SUM and CARRY outputs.', hints: ['XOR produces the sum bit; AND produces the carry bit.', 'Route both inputs to both gates, then connect XOR to SUM and AND to CARRY.'] },
+  { id: 'bus-mux', title: '3 · Select a data bus', objective: 'Use SEL to choose between two 2-bit data buses.', hints: ['When SEL is LOW choose A; when HIGH choose B.', 'Connect A and B to the MUX data pins, SEL to its selector, and the output bus to Y.'] },
+  { id: 'decoder', title: '4 · Decode an address', objective: 'Create a 2-to-4 decoder with exactly one active output for each address.', hints: ['Connect A0 and A1 to the decoder in least-significant-bit order.', 'Connect decoder outputs 0–3 to Y0–Y3 in the same order.'] },
+  { id: 'register', title: '5 · Store a value', objective: 'Capture a 2-bit bus in a clocked register and retain it until another edge.', hints: ['Connect the data bus to D and the clock source to CLK.', 'Pulse the clock after changing the data; the register output should retain the captured value.'] }
 ];
 
 const truth = (type, inputs) => {
@@ -85,9 +86,15 @@ export class ChipLabPanel {
     this.undoStack = [];
     this.redoStack = [];
     this.selectedWireIndex = null;
+    this.watchNodeIds = new Set();
+    this.breakpointNodeIds = new Set();
+    this.breakpointHit = null;
     this.learningProgress = this.loadLearningProgress();
+    this.learningStats = this.loadLearningStats();
     this.learningLesson = null;
     this.learningLessonIndex = 0;
+    this.learningHintCount = 0;
+    this.learningLastResult = null;
     this.historyCapture = null;
     this.loadTestBench();
     this.el = document.createElement('section');
@@ -173,6 +180,7 @@ export class ChipLabPanel {
               <button type="button" data-chip-action="paste" title="Paste copied components (Ctrl+V)">Paste</button>
               <button type="button" data-chip-action="grid-snap" class="active" title="Toggle 20-unit grid snapping">Snap: On</button>
               <button type="button" data-chip-action="group" title="Toggle multi-select">Select group</button>
+              <button type="button" data-chip-action="auto-label-nets" title="Automatically name new nets from their source component">Auto-name nets: Off</button>
               <button type="button" data-chip-action="align-x" title="Align selected components horizontally">Align X</button>
               <button type="button" data-chip-action="align-y" title="Align selected components vertically">Align Y</button>
               <button type="button" data-chip-action="distribute-x" title="Distribute selected components horizontally">Space X</button>
@@ -189,6 +197,7 @@ export class ChipLabPanel {
               <defs>
                 <pattern id="chip-grid-small" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#243041" stroke-width="0.7"/></pattern>
                 <pattern id="chip-grid-large" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#chip-grid-small)"/><path d="M 100 0 L 0 0 0 100" fill="none" stroke="#344357" stroke-width="1"/></pattern>
+                <marker id="chip-wire-arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L7 3.5 L0 7 Z" fill="#a8b7ca"/></marker>
               </defs>
               <rect width="1200" height="740" fill="url(#chip-grid-large)"/>
               <g data-chip-wires></g><g data-chip-nodes></g>
@@ -219,7 +228,7 @@ export class ChipLabPanel {
           <label>TEST BENCH NAME<input data-testbench-name maxlength="48" value="Untitled test bench"></label>
           <div class="chip-testbench-steps" data-testbench-steps></div>
           <div class="chip-testbench-results" data-testbench-results aria-live="polite"></div>
-          <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button data-chip-action="generate-exhaustive">Generate exhaustive</button><button data-chip-action="generate-random">Add 32 random</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button></footer>
+          <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button data-chip-action="generate-exhaustive">Generate exhaustive</button><label class="chip-testbench-seed">Seed <input data-random-seed type="number" min="0" max="4294967295" step="1" placeholder="optional"></label><button data-chip-action="generate-random">Add 32 random</button><button data-chip-action="generate-boundary">Boundary cases</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button><button data-chip-action="import-testbench-csv">Import CSV (append)</button><button data-chip-action="export-testbench-csv">Export CSV</button><input type="file" accept=".csv,text/csv" data-testbench-csv-file hidden></footer>
           <p data-testbench-result></p>
         </section>
       </div>
@@ -321,6 +330,13 @@ export class ChipLabPanel {
           this.renderCanvas();
         }
       }
+      if (event.target.matches('[data-chip-note]')) {
+        const node = this.nodes.find((entry) => entry.id === event.target.dataset.nodeId);
+        if (node) {
+          node.note = event.target.value.slice(0, 160);
+          this.renderCanvas();
+        }
+      }
       if (event.target.matches('[data-testbench-name]')) {
         this.testBench.name = event.target.value.trim() || 'Untitled test bench';
         this.persistTestBenches();
@@ -374,13 +390,14 @@ export class ChipLabPanel {
     });
     this.el.querySelector('[data-chip-file]').addEventListener('change', (event) => this.importDesign(event.target.files?.[0]));
     this.el.querySelector('[data-chip-hdl-file]').addEventListener('change', (event) => this.importVerilog(event.target.files?.[0]));
+    this.el.querySelector('[data-testbench-csv-file]').addEventListener('change', (event) => this.importTestBenchCsv(event.target.files?.[0]));
     this.el.addEventListener('focusin', (event) => {
-      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-wire-route]')) {
+      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-wire-route],[data-chip-note]')) {
         this.historyCapture = this.snapshotDesign();
       }
     });
     this.el.addEventListener('change', (event) => {
-      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label]')) {
+      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-chip-note]')) {
         this.commitHistory(this.historyCapture);
         this.historyCapture = null;
       }
@@ -559,6 +576,18 @@ export class ChipLabPanel {
       this.setGroupSelectionMode(!this.groupSelectMode);
       this.setStatus(this.groupSelectMode ? 'Group selection enabled · click components to add or remove them.' : 'Group selection disabled.');
     }
+    if (action === 'auto-label-nets') {
+      this.autoLabelNets = !this.autoLabelNets;
+      const button = this.el.querySelector('[data-chip-action="auto-label-nets"]');
+      button.classList.toggle('active', this.autoLabelNets);
+      button.textContent = `Auto-name nets: ${this.autoLabelNets ? 'On' : 'Off'}`;
+      this.setStatus(this.autoLabelNets
+        ? 'New signal connections will inherit a name from their source component.'
+        : 'Automatic signal naming is off.');
+    }
+    if (action === 'toggle-watch') this.toggleWatch(detail.nodeId);
+    if (action === 'toggle-breakpoint') this.toggleBreakpoint(detail.nodeId);
+    if (action === 'focus-watch') this.focusWaveSignal(detail.watchId);
     if (action === 'create-subcircuit') this.openSubcircuitDialog();
     if (action === 'cancel-subcircuit') this.el.querySelector('[data-chip-subcircuit-modal]').hidden = true;
     if (action === 'save-subcircuit') this.createSubcircuit();
@@ -575,7 +604,13 @@ export class ChipLabPanel {
     if (action === 'delete-test-step') this.deleteTestBenchStep(Number(detail.testStepIndex));
     if (action === 'run-testbench') this.runTestBench();
     if (action === 'generate-exhaustive') this.generateTestVectors('exhaustive');
-    if (action === 'generate-random') this.generateTestVectors('random', 32);
+    if (action === 'generate-random') {
+      const rawSeed = this.el.querySelector('[data-random-seed]').value;
+      this.generateTestVectors('random', 32, rawSeed === '' ? undefined : Number(rawSeed));
+    }
+    if (action === 'generate-boundary') this.generateTestVectors('boundary');
+    if (action === 'export-testbench-csv') this.exportTestBenchCsv();
+    if (action === 'import-testbench-csv') this.el.querySelector('[data-testbench-csv-file]').click();
     if (action === 'export-vcd') this.exportVcd();
     if (action === 'clear-waveforms') {
       this.resetTrace();
@@ -613,6 +648,8 @@ export class ChipLabPanel {
     if (action === 'select-lesson') this.selectLearningLesson(Number(detail.lessonIndex));
     if (action === 'load-lesson') this.loadLearningLesson();
     if (action === 'check-lesson') this.checkLearningLesson();
+    if (action === 'reveal-learning-hint') this.revealLearningHint();
+    if (action === 'next-learning-lesson') this.nextLearningLesson();
     if (action === 'insert-library-chip') this.insertCustomChip(this.el.querySelector('[data-chip-action="insert-library-chip"]')?.dataset.chipId);
     if (action === 'open-projects') this.openProjects();
     if (action === 'close-projects') this.el.querySelector('[data-chip-project-modal]').hidden = true;
@@ -1309,7 +1346,12 @@ export class ChipLabPanel {
 
   connect(source, outputIndex, target, inputIndex) {
     this.commitHistory();
-    this.wires.push({ from: source.id, output: outputIndex, to: target.id, input: inputIndex });
+    const portNames = source.type === 'ADDER' ? ['SUM', 'COUT']
+      : source.type === 'COMPARATOR' ? ['GT', 'EQ', 'LT'] : null;
+    const label = this.autoLabelNets
+      ? `${source.label}${this.outputCount(source) > 1 ? `.${portNames?.[outputIndex] || `Q${outputIndex}`}` : ''}`.slice(0, 32)
+      : undefined;
+    this.wires.push({ from: source.id, output: outputIndex, to: target.id, input: inputIndex, label });
     this.selectedWireIndex = null;
     this.resetTrace();
   }
@@ -1688,6 +1730,7 @@ export class ChipLabPanel {
 
   captureClockEdge() {
     const edgeState = this.evaluate();
+    const previousSignals = new Map(edgeState.outputs);
     this.clockEdgeLog ||= [];
     this.clockEdgeCount ||= 0;
     const previous = new Map(this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type))
@@ -1758,6 +1801,13 @@ export class ChipLabPanel {
         .map((node) => `${node.label}: ${previous.get(node.id)} → ${this.describeSequentialState(node)}`);
       this.clockEdgeLog.unshift({ edge: this.clockEdgeCount, changes });
       this.clockEdgeLog = this.clockEdgeLog.slice(0, 12);
+      if (this.clockTimer) {
+        this.breakpointNodeIds ||= new Set();
+        const nextSignals = this.evaluate().outputs;
+        const changedBreakpoint = this.nodes.find((node) => this.breakpointNodeIds.has(node.id) &&
+          JSON.stringify(previousSignals.get(node.id)) !== JSON.stringify(nextSignals.get(node.id)));
+        if (changedBreakpoint) this.breakpointHit = changedBreakpoint.label;
+      }
     }
     return captured;
   }
@@ -1784,9 +1834,22 @@ export class ChipLabPanel {
       this.clockHigh = !this.clockHigh;
       const clocks = this.nodes.filter((node) => node.type === 'CLOCK');
       clocks.forEach((clock) => { clock.value = this.clockHigh; });
-      if (this.clockHigh) this.captureClockEdge();
+      if (this.clockHigh) {
+        this.breakpointHit = null;
+        this.captureClockEdge();
+      }
+      if (this.breakpointHit) {
+        window.clearInterval(this.clockTimer);
+        this.clockTimer = null;
+        this.clockHigh = false;
+        clocks.forEach((clock) => { clock.value = false; });
+      }
       this.runSimulation();
       this.recordTrace();
+      if (this.breakpointHit) {
+        this.setStatus(`Clock paused at breakpoint · "${this.breakpointHit}" changed.`);
+        this.breakpointHit = null;
+      }
     }, Math.max(100, this.clockPeriod / 2));
     this.renderSimulation();
     this.setStatus(`Automatic clock running · ${this.clockPeriod} ms period.`);
@@ -1801,6 +1864,36 @@ export class ChipLabPanel {
       this.renderCanvas();
       if (!this.el.querySelector('[data-chip-simulation]').hidden) this.renderSimulation();
     }
+
+  }
+
+  toggleWatch(nodeId) {
+    this.watchNodeIds ||= new Set();
+    const node = this.nodes.find((entry) => entry.id === nodeId);
+    if (!node) return false;
+    if (this.watchNodeIds.has(nodeId)) this.watchNodeIds.delete(nodeId);
+    else this.watchNodeIds.add(nodeId);
+    this.render();
+    this.setStatus(this.watchNodeIds.has(nodeId)
+      ? `Watching "${node.label}" in the simulation panel.`
+      : `Removed "${node.label}" from the watch list.`);
+    return true;
+  }
+
+  toggleBreakpoint(nodeId) {
+    this.breakpointNodeIds ||= new Set();
+    const node = this.nodes.find((entry) => entry.id === nodeId);
+    if (!node || !SEQUENTIAL_TYPES.has(node.type)) {
+      this.setStatus('Clock breakpoints can only be set on sequential components.');
+      return false;
+    }
+    if (this.breakpointNodeIds.has(nodeId)) this.breakpointNodeIds.delete(nodeId);
+    else this.breakpointNodeIds.add(nodeId);
+    this.render();
+    this.setStatus(this.breakpointNodeIds.has(nodeId)
+      ? `Automatic clock will pause when "${node.label}" changes state.`
+      : `Removed the clock breakpoint on "${node.label}".`);
+    return true;
   }
 
   openCustomChipEditor() {
@@ -1992,7 +2085,7 @@ export class ChipLabPanel {
     this.setStatus(`Added test vector ${this.testBench.steps.length} to "${this.testBench.name}".`);
   }
 
-  generateTestVectors(mode, requestedCount = undefined) {
+  generateTestVectors(mode, requestedCount = undefined, seed = undefined) {
     const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
     const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
     const remaining = 512 - this.testBench.steps.length;
@@ -2008,27 +2101,43 @@ export class ChipLabPanel {
       this.setStatus('This test bench already contains the maximum of 512 vectors.');
       return 0;
     }
+    if (seed !== undefined && (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff)) {
+      this.setStatus('Random seed must be a whole number from 0 to 4294967295.');
+      return 0;
+    }
     const bitCount = inputs.reduce((total, node) =>
       total + (node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.width || 4 : 1), 0);
     if (!Number.isInteger(bitCount) || bitCount < 1 || bitCount > 10) {
       this.setStatus(`Automatic exhaustive tests support 1–10 input bits; this design has ${bitCount}.`);
       return 0;
     }
-    const total = mode === 'exhaustive' ? 2 ** bitCount : Math.min(requestedCount || 32, 512);
+    const total = mode === 'exhaustive' ? 2 ** bitCount
+      : mode === 'boundary' ? 4 : Math.min(requestedCount || 32, 512);
     if (mode === 'exhaustive' && total > remaining) {
       this.setStatus(`Exhaustive testing needs ${total} slots, but only ${remaining} remain. Remove vectors or start a new test bench.`);
       return 0;
     }
     const count = Math.min(total, remaining);
     const steps = [];
+    let randomState = seed === undefined ? null : seed || 0x6d2b79f5;
+    const nextRandom = () => {
+      randomState ^= randomState << 13;
+      randomState ^= randomState >>> 17;
+      randomState ^= randomState << 5;
+      return (randomState >>> 0) / 0x100000000;
+    };
     for (let vector = 0; vector < count; vector += 1) {
-      let bits = mode === 'exhaustive' ? vector : Math.floor(Math.random() * (2 ** bitCount));
+      let bits = mode === 'exhaustive' ? vector
+        : mode === 'boundary' ? 0
+          : Math.floor((randomState === null ? Math.random() : nextRandom()) * (2 ** bitCount));
       const values = new Map();
       const inputValues = {};
-      for (const node of inputs) {
+      for (const [inputIndex, node] of inputs.entries()) {
         const width = node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.width || 4 : 1;
-        const value = bits & BUS_MASK(width);
-        bits >>>= width;
+        const mask = BUS_MASK(width);
+        const boundary = [0, mask, mask & 0x55555555, mask & 0xaaaaaaaa];
+        const value = mode === 'boundary' ? boundary[(vector + inputIndex) % boundary.length] : bits & mask;
+        if (mode !== 'boundary') bits >>>= width;
         const inputValue = width === 1 ? Boolean(value) : value;
         values.set(node.id, inputValue);
         inputValues[node.id] = inputValue;
@@ -2044,8 +2153,8 @@ export class ChipLabPanel {
     this.testBench.steps.push(...steps);
     this.persistTestBenches();
     this.renderTestBenchSteps();
-    const kind = mode === 'exhaustive' ? 'exhaustive' : 'random';
-    this.setStatus(`Added ${steps.length} ${kind} test vector${steps.length === 1 ? '' : 's'} to "${this.testBench.name}".`);
+    const kind = mode === 'exhaustive' ? 'exhaustive' : mode === 'boundary' ? 'boundary' : 'random';
+    this.setStatus(`Added ${steps.length} ${kind} test vector${steps.length === 1 ? '' : 's'} to "${this.testBench.name}".${mode === 'random' && seed !== undefined ? ` Seed: ${seed}.` : ''}`);
     return steps.length;
   }
 
@@ -2098,15 +2207,165 @@ export class ChipLabPanel {
       panel.innerHTML = '<p class="chip-sim-empty">Run the test bench to see expected and actual outputs for every vector.</p>';
       return;
     }
+    const inputNodes = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
+    const combinations = new Set(this.testBench.steps.map((step) =>
+      JSON.stringify(inputNodes.map((node) => step.inputs?.[node.id] ?? null))
+    ));
     const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
     const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
     const formatValues = (nodes, values) => nodes.map((node) =>
       `${escapeHTML(node.label)}=${escapeHTML(this.formatTestValue(node, values?.[node.id]))}`
     ).join(' · ') || '—';
-    panel.innerHTML = `<div class="chip-testbench-results-scroll"><table><thead><tr><th>#</th><th>Inputs</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead><tbody>${this.testBench.steps.map((step, index) => {
+    const inputBits = inputNodes.reduce((total, node) => total +
+      (node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.width || 4 : 1), 0);
+    const possible = inputBits <= 10 && !this.nodes.some((node) => SEQUENTIAL_TYPES.has(node.type) || node.type === 'CLOCK')
+      ? 2 ** inputBits : null;
+    panel.innerHTML = `<p class="chip-testbench-coverage">Input combinations covered: ${combinations.size}${possible ? ` / ${possible} (${Math.round(combinations.size / possible * 100)}%)` : ' distinct vectors'}</p><div class="chip-testbench-results-scroll"><table><thead><tr><th>#</th><th>Inputs</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead><tbody>${this.testBench.steps.map((step, index) => {
       const status = step.result === true ? 'PASS' : step.result === false ? 'FAIL' : 'NOT RUN';
       return `<tr><td>${index + 1}</td><td>${formatValues(inputs, step.inputs)}</td><td>${formatValues(outputs, step.expected)}</td><td>${formatValues(outputs, step.actual)}</td><td class="${step.result === true ? 'passed' : step.result === false ? 'failed' : ''}">${status}</td></tr>`;
     }).join('')}</tbody></table></div>`;
+  }
+
+  buildTestBenchCsv() {
+    const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
+    const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const csvCell = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const columns = ['Test', 'Clock', ...inputs.map((node) => `Input: ${node.label}`),
+      ...outputs.flatMap((node) => [`Expected: ${node.label}`, `Actual: ${node.label}`]), 'Result', 'Failure'];
+    return [columns, ...this.testBench.steps.map((step, index) => [
+      index + 1, step.clock ? 'rising edge' : '',
+      ...inputs.map((node) => this.formatTestValue(node, step.inputs?.[node.id])),
+      ...outputs.flatMap((node) => [
+        this.formatTestValue(node, step.expected?.[node.id]),
+        this.formatTestValue(node, step.actual?.[node.id])
+      ]),
+      step.result === true ? 'PASS' : step.result === false ? 'FAIL' : 'NOT RUN',
+      step.failure || ''
+    ])].map((row) => row.map(csvCell).join(',')).join('\r\n');
+  }
+
+  parseTestBenchCsv(content) {
+    const rows = [];
+    let row = [];
+    let cell = '';
+    let quoted = false;
+    let closedQuote = false;
+    for (let index = content.charCodeAt(0) === 0xfeff ? 1 : 0; index < content.length; index += 1) {
+      const character = content[index];
+      if (quoted) {
+        if (character === '"' && content[index + 1] === '"') {
+          cell += '"';
+          index += 1;
+        } else if (character === '"') {
+          quoted = false;
+          closedQuote = true;
+        } else cell += character;
+      } else if (character === ',' || character === '\r' || character === '\n') {
+        row.push(cell);
+        cell = '';
+        closedQuote = false;
+        if (character !== ',') {
+          if (character === '\r' && content[index + 1] === '\n') index += 1;
+          if (row.some((value) => value !== '')) rows.push(row);
+          row = [];
+        }
+      } else if (character === '"' && cell === '' && !closedQuote) {
+        quoted = true;
+      } else {
+        if (closedQuote) throw new Error('Unexpected content after a quoted CSV field.');
+        cell += character;
+      }
+    }
+    if (quoted) throw new Error('The CSV file ends inside a quoted field.');
+    row.push(cell);
+    if (row.some((value) => value !== '')) rows.push(row);
+    if (rows.length < 2) throw new Error('The CSV file needs a header and at least one vector row.');
+
+    const headers = rows[0].map((header) => header.trim());
+    if (new Set(headers).size !== headers.length) throw new Error('The CSV file contains duplicate column names.');
+    const column = (name) => headers.indexOf(name);
+    const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
+    const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const inputColumns = inputs.map((node) => {
+      const index = column(`Input: ${node.label}`);
+      if (index < 0) throw new Error(`The CSV is missing input column "${node.label}".`);
+      return index;
+    });
+    const outputColumns = outputs.map((node) => {
+      const index = column(`Expected: ${node.label}`);
+      if (index < 0) throw new Error(`The CSV is missing expected-output column "${node.label}".`);
+      return index;
+    });
+    const clockColumn = column('Clock');
+    const parseValue = (raw, node) => {
+      const value = raw.trim();
+      const isBus = ['BUS_INPUT', 'BUS_CONST', 'BUS_OUTPUT'].includes(node.type);
+      if (!isBus) {
+        if (/^(?:HIGH\s*\(1\)|1)$/i.test(value)) return true;
+        if (/^(?:LOW\s*\(0\)|0)$/i.test(value)) return false;
+        throw new Error(`Invalid logic value "${raw}" for ${node.label}; use HIGH (1) or LOW (0).`);
+      }
+      const formatted = value.match(/^([01]+)\s+\((\d+)\)$/);
+      const numeric = formatted ? Number(formatted[2]) : /^\d+$/.test(value) ? Number(value) : NaN;
+      if (!Number.isSafeInteger(numeric) || numeric < 0 || numeric > BUS_MASK(node.width || 4) ||
+        formatted && parseInt(formatted[1], 2) !== numeric) {
+        throw new Error(`Invalid ${node.width || 4}-bit bus value "${raw}" for ${node.label}.`);
+      }
+      return numeric;
+    };
+    const vectors = rows.slice(1).map((values, index) => {
+      if (values.length !== headers.length) throw new Error(`CSV row ${index + 2} has ${values.length} fields; expected ${headers.length}.`);
+      const clock = clockColumn < 0 ? '' : values[clockColumn].trim().toLowerCase();
+      if (clock && clock !== 'rising edge') throw new Error(`CSV row ${index + 2} has unsupported clock value "${values[clockColumn]}".`);
+      return {
+        inputs: Object.fromEntries(inputs.map((node, inputIndex) =>
+          [node.id, parseValue(values[inputColumns[inputIndex]], node)])),
+        expected: Object.fromEntries(outputs.map((node, outputIndex) =>
+          [node.id, parseValue(values[outputColumns[outputIndex]], node)])),
+        clock: clock === 'rising edge'
+      };
+    });
+    return vectors;
+  }
+
+  async importTestBenchCsv(file) {
+    if (!file) return false;
+    try {
+      if (file.size > 1024 * 1024) throw new Error('CSV files must be 1 MB or smaller.');
+      const vectors = this.parseTestBenchCsv(await file.text());
+      const remaining = 512 - this.testBench.steps.length;
+      if (vectors.length > remaining) {
+        throw new Error(`The CSV contains ${vectors.length} vectors, but this test bench has room for only ${remaining}.`);
+      }
+      if (!vectors.length) throw new Error('The CSV contains no test vectors.');
+      this.invalidateTestBenchResults();
+      this.testBench.steps.push(...vectors);
+      this.persistTestBenches();
+      this.renderTestBenchSteps();
+      this.setStatus(`Imported ${vectors.length} CSV test vector${vectors.length === 1 ? '' : 's'} and appended them to "${this.testBench.name}".`);
+      return true;
+    } catch (error) {
+      this.setStatus(`Could not import test bench CSV: ${error.message}`);
+      return false;
+    } finally {
+      this.el.querySelector('[data-testbench-csv-file]').value = '';
+    }
+  }
+
+  exportTestBenchCsv() {
+    if (!this.testBench.steps.length) {
+      this.setStatus('Add at least one vector before exporting test results.');
+      return false;
+    }
+    const blob = new Blob([this.buildTestBenchCsv()], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${this.testBench.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'chip-tests'}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    this.setStatus(`Exported ${this.testBench.steps.length} test vectors as CSV.`);
+    return true;
   }
 
   runTestBench() {
@@ -2313,7 +2572,7 @@ export class ChipLabPanel {
           ? `M ${start.x} ${start.y} L ${(start.x + end.x) / 2} ${start.y} L ${(start.x + end.x) / 2} ${end.y} L ${end.x} ${end.y}`
           : `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`;
       const selected = this.selectedWireIndex === index;
-      return `<g class="chip-wire-group ${selected ? 'selected' : ''} ${wire.probe ? 'probed' : ''}"><path class="chip-wire ${high ? 'high' : ''}" d="${path}"/><path class="chip-wire-hit" data-chip-delete-wire="${index}" d="${path}" aria-label="Select wire ${index + 1}; double-click to delete"/><circle class="chip-wire-value ${high ? 'high' : ''}" cx="${(start.x + end.x) / 2}" cy="${(start.y + end.y) / 2}" r="4"/>${wire.probe ? `<text class="chip-wire-probe" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - 12}">PROBE</text>` : ''}${wire.label ? `<text class="chip-wire-label" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - (wire.probe ? 20 : 8)}">${escapeHTML(wire.label)}</text>` : ''}</g>`;
+      return `<g class="chip-wire-group ${selected ? 'selected' : ''} ${wire.probe ? 'probed' : ''}"><path class="chip-wire ${high ? 'high' : ''}" d="${path}" marker-end="url(#chip-wire-arrow)"/><path class="chip-wire-hit" data-chip-delete-wire="${index}" d="${path}" aria-label="Select wire ${index + 1}; double-click to delete"/><circle class="chip-wire-value ${high ? 'high' : ''}" cx="${(start.x + end.x) / 2}" cy="${(start.y + end.y) / 2}" r="4"/>${wire.probe ? `<text class="chip-wire-probe" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - 12}">PROBE</text>` : ''}${wire.label ? `<text class="chip-wire-label" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - (wire.probe ? 20 : 8)}">${escapeHTML(wire.label)}</text>` : ''}</g>`;
     }).join('');
     nodesLayer.innerHTML = this.nodes.map((node) => {
       const height = this.nodeHeight(node);
@@ -2364,7 +2623,7 @@ export class ChipLabPanel {
           GATES[node.type] ? `<text class="chip-gate-mark" x="75" y="${height - 15}">${node.type === 'NOT' || node.type === 'BUF' ? 'A → Q' : 'A · B → Q'}</text>` : '';
       const displayedValue = node.type === 'CLOCK' || node.type === 'CONST' ? (node.value ? '1' : '0') :
         typeof value === 'number' ? value.toString(2).padStart(node.width || 4, '0') : value === true ? '1' : value === false ? '0' : '—';
-      return `<g class="chip-node ${node.type.toLowerCase()} ${selected ? 'selected' : ''} ${cls}" data-chip-node data-node-id="${node.id}" transform="translate(${node.x},${node.y})" tabindex="0"><rect class="chip-node-body" width="150" height="${height}" rx="9"/><rect class="chip-node-header" width="150" height="23" rx="9"/><path class="chip-node-header-square" d="M0 14h150v9H0z"/><text class="chip-node-type" x="11" y="16">${header}</text><text class="chip-node-label" x="12" y="43">${escapeHTML(node.label)}</text>${gateMark}${toggle}${inputPins}${outputPorts}<circle class="chip-value-lamp ${cls}" cx="${node.type === 'INPUT' || node.type === 'CONST' ? 21 : 132}" cy="${height - 15}" r="4"/><text class="chip-value-text" x="${node.type === 'INPUT' || node.type === 'CONST' ? 32 : 119}" y="${height - 11}">${displayedValue}</text></g>`;
+      return `<g class="chip-node ${node.type.toLowerCase()} ${selected ? 'selected' : ''} ${cls}" data-chip-node data-node-id="${node.id}" transform="translate(${node.x},${node.y})" tabindex="0"><rect class="chip-node-body" width="150" height="${height}" rx="9"/><rect class="chip-node-header" width="150" height="23" rx="9"/><path class="chip-node-header-square" d="M0 14h150v9H0z"/><text class="chip-node-type" x="11" y="16">${header}</text><text class="chip-node-label" x="12" y="43">${escapeHTML(node.label)}</text>${gateMark}${toggle}${inputPins}${outputPorts}<circle class="chip-value-lamp ${cls}" cx="${node.type === 'INPUT' || node.type === 'CONST' ? 21 : 132}" cy="${height - 15}" r="4"/><text class="chip-value-text" x="${node.type === 'INPUT' || node.type === 'CONST' ? 32 : 119}" y="${height - 11}">${displayedValue}</text>${node.note ? `<text class="chip-node-note" x="4" y="${height + 14}">${escapeHTML(node.note.slice(0, 36))}</text>` : ''}</g>`;
     }).join('');
     this.el.querySelector('[data-chip-empty]').hidden = this.nodes.length > 0;
     this.el.querySelector('[data-chip-count]').textContent = `${this.nodes.length} components · ${this.wires.length} nets`;
@@ -2451,11 +2710,35 @@ export class ChipLabPanel {
     }
   }
 
+  loadLearningStats() {
+    try {
+      const stats = JSON.parse(localStorage.getItem(LEARNING_STATS_KEY) || '{}');
+      if (!stats || typeof stats !== 'object' || Array.isArray(stats)) return {};
+      return Object.fromEntries(LEARNING_LESSONS.flatMap(({ id }) => {
+        const entry = stats[id];
+        if (!entry || !Number.isInteger(entry.attempts) || entry.attempts < 0 ||
+          !Number.isInteger(entry.bestScore) || entry.bestScore < 0 || entry.bestScore > 100) return [];
+        return [[id, { attempts: entry.attempts, bestScore: entry.bestScore }]];
+      }));
+    } catch (error) {
+      console.error('Could not load Chip Lab learning scores:', error);
+      return {};
+    }
+  }
+
   saveLearningProgress() {
     try {
       localStorage.setItem(LEARNING_PROGRESS_KEY, JSON.stringify(this.learningProgress));
     } catch (error) {
       this.setStatus(`Could not save learning progress: ${error.message}`);
+    }
+  }
+
+  saveLearningStats() {
+    try {
+      localStorage.setItem(LEARNING_STATS_KEY, JSON.stringify(this.learningStats));
+    } catch (error) {
+      this.setStatus(`Could not save Chip Lab learning scores: ${error.message}`);
     }
   }
 
@@ -2467,6 +2750,8 @@ export class ChipLabPanel {
   selectLearningLesson(index) {
     if (!Number.isInteger(index) || !LEARNING_LESSONS[index]) return;
     this.learningLessonIndex = index;
+    this.learningHintCount = 0;
+    this.learningLastResult = null;
     this.renderLearningPath();
   }
 
@@ -2474,10 +2759,43 @@ export class ChipLabPanel {
     const list = this.el.querySelector('[data-learning-list]');
     const content = this.el.querySelector('[data-learning-content]');
     list.innerHTML = LEARNING_LESSONS.map((lesson, index) =>
-      `<button data-chip-action="select-lesson" data-lesson-index="${index}" class="${index === this.learningLessonIndex ? 'active' : ''}">${escapeHTML(lesson.title)}${this.learningProgress.includes(lesson.id) ? ' ✓' : ''}</button>`
+      `<button data-chip-action="select-lesson" data-lesson-index="${index}" class="${index === this.learningLessonIndex ? 'active' : ''}">${escapeHTML(lesson.title)}${this.learningProgress.includes(lesson.id) ? ' ✓' : ''}${this.learningStats[lesson.id]?.attempts ? ` · ${this.learningStats[lesson.id].bestScore} pts` : ''}</button>`
     ).join('');
     const lesson = LEARNING_LESSONS[this.learningLessonIndex];
-    content.innerHTML = `<span>LESSON ${this.learningLessonIndex + 1} OF ${LEARNING_LESSONS.length}</span><h3>${escapeHTML(lesson.title.slice(4))}</h3><p>${escapeHTML(lesson.objective)}</p><aside><strong>HINT</strong><p>${escapeHTML(lesson.hint)}</p></aside><p class="chip-learning-result">${this.learningProgress.includes(lesson.id) ? 'Completed — you can replay this lesson any time.' : 'Not completed yet.'}</p>`;
+    const stats = this.learningStats[lesson.id] || { attempts: 0, bestScore: 0 };
+    const revealedHints = lesson.hints.slice(0, this.learningHintCount)
+      .map((hint, index) => `<p><b>${index + 1}.</b> ${escapeHTML(hint)}</p>`).join('');
+    const result = this.learningLastResult?.lessonId === lesson.id
+      ? this.learningLastResult.passed
+        ? `Passed · ${this.learningLastResult.score} points · best ${stats.bestScore} · ${stats.attempts} attempt${stats.attempts === 1 ? '' : 's'}`
+        : `Not passed yet · ${stats.attempts} attempt${stats.attempts === 1 ? '' : 's'} · adjust the circuit and try again.`
+      : this.learningProgress.includes(lesson.id)
+        ? `Completed · best score ${stats.bestScore} · ${stats.attempts} attempt${stats.attempts === 1 ? '' : 's'}`
+        : `Not completed yet · ${stats.attempts} attempt${stats.attempts === 1 ? '' : 's'}`;
+    const canRevealHint = this.learningHintCount < lesson.hints.length;
+    content.innerHTML = `<span>LESSON ${this.learningLessonIndex + 1} OF ${LEARNING_LESSONS.length} · BEST ${stats.bestScore} PTS</span><h3>${escapeHTML(lesson.title.slice(4))}</h3><p>${escapeHTML(lesson.objective)}</p><aside><strong>HINTS · ${this.learningHintCount}/${lesson.hints.length}</strong>${revealedHints || '<p>Try the challenge first, or reveal a hint when you need one.</p>'}${canRevealHint ? '<button data-chip-action="reveal-learning-hint">Reveal next hint</button>' : ''}</aside><p class="chip-learning-result" aria-live="polite">${escapeHTML(result)}</p>`;
+    this.el.querySelector('[data-chip-action="next-learning-lesson"]')?.remove();
+    if (this.learningLastResult?.lessonId === lesson.id && this.learningLastResult.passed &&
+      this.learningLessonIndex < LEARNING_LESSONS.length - 1) {
+      const next = document.createElement('button');
+      next.type = 'button';
+      next.dataset.chipAction = 'next-learning-lesson';
+      next.textContent = 'Next challenge';
+      this.el.querySelector('.chip-learning-modal footer').appendChild(next);
+    }
+  }
+
+  revealLearningHint() {
+    const lesson = LEARNING_LESSONS[this.learningLessonIndex];
+    if (this.learningHintCount >= lesson.hints.length) return;
+    this.learningHintCount += 1;
+    this.renderLearningPath();
+  }
+
+  nextLearningLesson() {
+    if (this.learningLessonIndex >= LEARNING_LESSONS.length - 1) return;
+    this.selectLearningLesson(this.learningLessonIndex + 1);
+    this.loadLearningLesson();
   }
 
   loadLearningLesson() {
@@ -2525,6 +2843,7 @@ export class ChipLabPanel {
     this.selectedNodeId = null;
     this.selectedNodeIds.clear();
     this.selectedWireIndex = null;
+    this.learningLastResult = null;
     this.el.querySelector('[data-chip-learning-modal]').hidden = true;
     this.render();
     this.runSimulation();
@@ -2581,16 +2900,22 @@ export class ChipLabPanel {
         passed = this.evaluate().outputs.get(output.id) === 2;
       }
     }
+    const stats = this.learningStats[lesson.id] || { attempts: 0, bestScore: 0 };
+    stats.attempts += 1;
+    const score = passed ? Math.max(0, 100 - Math.max(0, stats.attempts - 1) * 10 - this.learningHintCount * 15) : 0;
+    if (passed) stats.bestScore = Math.max(stats.bestScore, score);
+    this.learningStats[lesson.id] = stats;
+    this.saveLearningStats();
     if (passed && !this.learningProgress.includes(lesson.id)) {
       this.learningProgress.push(lesson.id);
       this.saveLearningProgress();
     }
+    this.learningLastResult = { lessonId: lesson.id, passed, score };
     this.renderLearningPath();
     this.render();
-    this.el.querySelector('.chip-learning-result').textContent = passed
-      ? 'Challenge passed — well done!'
-      : 'Not quite yet. Compare your circuit with the hint and try again.';
-    this.setStatus(passed ? `Lesson complete · ${lesson.title}.` : `Lesson not passed yet · ${lesson.title}.`);
+    this.setStatus(passed
+      ? `Lesson complete · ${lesson.title} · ${score} points (${this.learningHintCount} hints used).`
+      : `Lesson not passed yet · attempt ${stats.attempts} · ${lesson.title}.`);
     return passed;
   }
 
@@ -2664,6 +2989,9 @@ export class ChipLabPanel {
       <div class="chip-inspector-heading"><span>COMPONENT PROPERTIES</span><button data-chip-delete="${node.id}" title="Delete component">Delete</button></div>
       <div class="chip-component-card"><span class="chip-component-symbol">${node.type === 'INPUT' ? 'IN' : node.type === 'OUTPUT' ? 'OUT' : node.type === 'CLOCK' ? 'CLK' : node.type === 'CUSTOM' ? 'IC' : node.type}</span><div><strong>${escapeHTML(node.label)}</strong><small>${escapeHTML(componentDescription)}</small></div></div>
       <label class="chip-form-field">Reference / net label<input data-chip-label maxlength="32" value="${escapeHTML(node.label)}"></label>
+      <label class="chip-form-field">Design note<textarea data-chip-note data-node-id="${escapeHTML(node.id)}" maxlength="160" rows="3" placeholder="Optional design intent or reminder">${escapeHTML(node.note || '')}</textarea></label>
+      <button class="chip-wide-action ${this.watchNodeIds?.has(node.id) ? 'is-on' : ''}" data-chip-action="toggle-watch" data-node-id="${escapeHTML(node.id)}">${this.watchNodeIds?.has(node.id) ? 'Remove from watch list' : 'Watch this signal'}</button>
+      ${SEQUENTIAL_TYPES.has(node.type) ? `<button class="chip-wide-action ${this.breakpointNodeIds?.has(node.id) ? 'is-on' : ''}" data-chip-action="toggle-breakpoint" data-node-id="${escapeHTML(node.id)}">${this.breakpointNodeIds?.has(node.id) ? 'Remove clock breakpoint' : 'Pause clock when changed'}</button>` : ''}
       <div class="chip-spec-list"><div><span>Component type</span><b>${node.type}</b></div><div><span>Input pins</span><b>${inputs}</b></div><div><span>Output pins</span><b>${output}</b></div><div><span>Logic state</span><b class="state-${node.simulatedValue === true || typeof node.simulatedValue === 'number' && node.simulatedValue > 0 ? 'high' : node.simulatedValue === false || node.simulatedValue === 0 ? 'low' : 'unknown'}">${logicState}</b></div><div><span>Signal connections</span><b>${this.wires.filter((wire) => wire.from === node.id || wire.to === node.id).length}</b></div></div>
       ${BUS_TYPES.has(node.type) ? `<label class="chip-form-field">Bus width<select data-chip-width data-node-id="${node.id}">${(node.type === 'DECODER' ? [2, 3, 4] : BUS_WIDTHS).map((width) => `<option value="${width}" ${Number(node.width || 4) === width ? 'selected' : ''}>${width} bits</option>`).join('')}</select></label>` : ''}
       ${node.type === 'RAM' ? `<div class="chip-spec-list"><div><span>RAM contents</span><b>${(node.memory || [0, 0, 0, 0]).map((value, index) => `${index}:${Number(value).toString(16).toUpperCase()}`).join(' · ')}</b></div></div>` : ''}
@@ -2694,6 +3022,7 @@ export class ChipLabPanel {
           : result.outputs.has(node.id) ? value ? '1 · HIGH' : '0 · LOW' : '— · OPEN';
         return `<div class="chip-sim-pin output"><span><i class="${value === true || typeof value === 'number' && value > 0 ? 'high' : result.outputs.has(node.id) ? 'low' : 'unknown'}"></i>${escapeHTML(node.label)}</span><b>${displayed}</b></div>`;
       }).join('') : '<p class="chip-sim-empty">Add output pins to monitor the design.</p>'}</div>
+      ${this.renderWatchList(result.outputs)}
       <div class="chip-sim-metrics"><div><span>Gates</span><b>${this.nodes.filter((node) => GATES[node.type] && !SEQUENTIAL_TYPES.has(node.type)).length}</b></div><div><span>Wires</span><b>${this.wires.length}</b></div><div><span>Unresolved</span><b>${result.unresolved.size}</b></div></div>
       <button class="chip-run-button" data-chip-action="simulate">▶ &nbsp; Run simulation</button>
       <button class="chip-truth-button" data-chip-action="truth">Generate truth table</button>
@@ -2713,7 +3042,21 @@ export class ChipLabPanel {
     const edges = this.clockEdgeLog.length
       ? this.clockEdgeLog.map((entry) => `<article><b>Edge ${entry.edge}</b><p>${escapeHTML(entry.changes.join(' · ') || 'Clock edge captured; state held.')}</p></article>`).join('')
       : '<p class="chip-sim-empty">Step the clock to record state changes.</p>';
-    return `<div class="chip-clock-state-list">${states}</div><div class="chip-clock-edge-list">${edges}</div>`;
+    const breakpoints = this.nodes.filter((node) => this.breakpointNodeIds?.has(node.id));
+    return `${breakpoints.length ? `<p class="chip-sim-note">Clock pauses on a rising edge when ${breakpoints.map((node) => escapeHTML(node.label)).join(', ')} changes state.</p>` : ''}<div class="chip-clock-state-list">${states}</div><div class="chip-clock-edge-list">${edges}</div>`;
+  }
+
+  renderWatchList(values = this.evaluate().outputs) {
+    const watched = this.nodes.filter((node) => this.watchNodeIds?.has(node.id));
+    if (!watched.length) return '';
+    return `<div class="chip-sim-section"><h3>WATCH LIST <span>${watched.length} SIGNALS</span></h3>${watched.map((node) => {
+      const value = values.get(node.id);
+      const display = Array.isArray(value)
+        ? value.map((bit, index) => `${index}:${typeof bit === 'number' ? bit : bit === true ? 1 : bit === false ? 0 : '—'}`).join(' · ')
+        : typeof value === 'number' ? `${value.toString(2).padStart(node.width || 4, '0')} · ${value}`
+          : value === true ? '1 · HIGH' : value === false ? '0 · LOW' : 'UNRESOLVED';
+      return `<button class="chip-watch-item" data-chip-action="focus-watch" data-watch-id="${escapeHTML(node.id)}"><span>${escapeHTML(node.label)}</span><b>${escapeHTML(display)}</b></button>`;
+    }).join('')}</div>`;
   }
 
   formatTestValue(node, value) {
@@ -3259,8 +3602,8 @@ export class ChipLabPanel {
       version: 4,
       designId: this.designId,
       name: this.chipName,
-      components: this.nodes.map(({ id, type, label, x, y, value, q, width, addressWidth, phase, memory, definition }) =>
-        ({ id, type, label, x, y, value, q, width, addressWidth, phase, memory, definition })),
+      components: this.nodes.map(({ id, type, label, note, x, y, value, q, width, addressWidth, phase, memory, definition }) =>
+        ({ id, type, label, note, x, y, value, q, width, addressWidth, phase, memory, definition })),
       wires: this.wires,
       testBench: this.testBench
     };
@@ -3288,6 +3631,9 @@ export class ChipLabPanel {
             typeof node.label !== 'string' || !Number.isFinite(node.x) || !Number.isFinite(node.y)) {
           throw new Error('The design contains an invalid component.');
         }
+        if (node.note !== undefined && typeof node.note !== 'string') {
+          throw new Error('The design contains an invalid component note.');
+        }
         if (node.type === 'CUSTOM' && !this.validateCustomDefinition(node.definition)) {
           throw new Error('The design contains an invalid reusable chip definition.');
         }
@@ -3300,7 +3646,9 @@ export class ChipLabPanel {
         }
         ids.add(node.id);
         return {
-          id: node.id, type: node.type, label: node.label.slice(0, 32), x: node.x, y: node.y,
+          id: node.id, type: node.type, label: node.label.slice(0, 32),
+          note: typeof node.note === 'string' ? node.note.slice(0, 160) : '',
+          x: node.x, y: node.y,
           value: node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.value : Boolean(node.value),
           q: ['REGISTER', 'COUNTER', 'RAM'].includes(node.type)
             ? Number.isInteger(node.q) && node.q >= 0 && node.q <= BUS_MASK(node.width || 4) ? node.q : 0

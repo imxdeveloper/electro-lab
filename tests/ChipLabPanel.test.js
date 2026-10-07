@@ -290,7 +290,7 @@ test('design import retains wire labels and routing metadata', async () => {
       version: 4,
       name: 'Labeled logic',
       components: [
-        { id: 'input', type: 'INPUT', label: 'A', x: 0, y: 0 },
+        { id: 'input', type: 'INPUT', label: 'A', note: 'Gate this carefully', x: 0, y: 0 },
         { id: 'not', type: 'NOT', label: 'Invert', x: 100, y: 0 },
         { id: 'output', type: 'OUTPUT', label: 'Y', x: 200, y: 0 }
       ],
@@ -307,6 +307,84 @@ test('design import retains wire labels and routing metadata', async () => {
   assert.equal(panel.wires[0].route, 'orthogonal');
   assert.equal(panel.wires[0].probe, true);
   assert.equal(panel.wires[1].route, undefined);
+  assert.equal(panel.nodes[0].note, 'Gate this carefully');
+});
+
+test('automatic net naming identifies multi-output pins', () => {
+  const panel = createPanel([
+    { id: 'adder', type: 'ADDER', label: 'SUM_BLOCK', width: 4 },
+    { id: 'carry', type: 'OUTPUT', label: 'CARRY' }
+  ], []);
+  panel.autoLabelNets = true;
+  panel.commitHistory = () => {};
+  panel.resetTrace = () => {};
+
+  panel.connect(panel.nodes[0], 1, panel.nodes[1], 0);
+
+  assert.equal(panel.wires[0].label, 'SUM_BLOCK.COUT');
+});
+
+test('automatic clock breakpoints detect sequential state changes on an edge', () => {
+  const panel = createPanel([
+    { id: 'data', type: 'INPUT', label: 'D', value: true },
+    { id: 'clock', type: 'CLOCK', label: 'CLK', value: true },
+    { id: 'ff', type: 'DFF', label: 'STATE', q: false }
+  ], [
+    { from: 'data', output: 0, to: 'ff', input: 0 },
+    { from: 'clock', output: 0, to: 'ff', input: 1 }
+  ]);
+  panel.clockTimer = 123;
+  panel.clockEdgeLog = [];
+  panel.clockEdgeCount = 0;
+  panel.breakpointNodeIds = new Set(['ff']);
+
+  assert.equal(panel.captureClockEdge(), 1);
+  assert.equal(panel.breakpointHit, 'STATE');
+});
+
+test('watch list renders live scalar and bus values and can be empty', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'ENABLE', value: true },
+    { id: 'bus', type: 'BUS_INPUT', label: 'DATA', width: 4, value: 10 }
+  ], []);
+  panel.watchNodeIds = new Set(['a', 'bus']);
+
+  const html = panel.renderWatchList();
+
+  assert.match(html, /ENABLE/);
+  assert.match(html, /1 · HIGH/);
+  assert.match(html, /DATA/);
+  assert.match(html, /1010 · 10/);
+  panel.watchNodeIds.clear();
+  assert.equal(panel.renderWatchList(), '');
+});
+
+test('component annotations render as escaped schematic text with signal direction', () => {
+  const wiresLayer = { innerHTML: '' };
+  const nodesLayer = { innerHTML: '' };
+  const emptyState = { hidden: false };
+  const count = { textContent: '' };
+  const panel = createPanel([
+    { id: 'input', type: 'INPUT', label: 'A', note: '<script>alert(1)</script>', x: 20, y: 40, value: true },
+    { id: 'output', type: 'OUTPUT', label: 'Y', x: 300, y: 40 }
+  ], [{ from: 'input', output: 0, to: 'output', input: 0 }]);
+  panel.el = { querySelector: (selector) => ({
+    '[data-chip-wires]': wiresLayer,
+    '[data-chip-nodes]': nodesLayer,
+    '[data-chip-empty]': emptyState,
+    '[data-chip-count]': count
+  })[selector] };
+  panel.selectedNodeIds = new Set();
+  panel.selectedWireIndex = null;
+  panel.inputCount = ChipLabPanel.prototype.inputCount;
+  panel.outputCount = ChipLabPanel.prototype.outputCount;
+  panel.portPosition = ChipLabPanel.prototype.portPosition;
+  panel.nodeHeight = ChipLabPanel.prototype.nodeHeight;
+  panel.renderCanvas();
+
+  assert.match(nodesLayer.innerHTML, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.doesNotMatch(nodesLayer.innerHTML, /<script>/);
+  assert.match(wiresLayer.innerHTML, /marker-end="url\(#chip-wire-arrow\)"/);
 });
 
 test('exhaustive test generation covers each scalar input combination', () => {
@@ -348,6 +426,130 @@ test('exhaustive generation refuses vectors that exceed the supported bit limit'
 
   assert.equal(panel.generateTestVectors('exhaustive'), 0);
   assert.match(panel.status, /1–10 input bits/);
+});
+
+test('seeded random vectors are reproducible', () => {
+  const createRandomPanel = () => {
+    const panel = createPanel([
+      { id: 'a', type: 'INPUT', label: 'A', value: false },
+      { id: 'b', type: 'INPUT', label: 'B', value: false },
+      { id: 'out', type: 'OUTPUT', label: 'Y' }
+    ], []);
+    panel.testBench = { name: 'Seeded', steps: [] };
+    panel.el = { querySelector: () => ({ value: 'Seeded' }) };
+    panel.persistTestBenches = () => {};
+    panel.renderTestBenchSteps = () => {};
+    panel.setStatus = (message) => { panel.status = message; };
+    return panel;
+  };
+  const first = createRandomPanel();
+  const second = createRandomPanel();
+
+  assert.equal(first.generateTestVectors('random', 16, 12345), 16);
+  assert.equal(second.generateTestVectors('random', 16, 12345), 16);
+  assert.deepEqual(first.testBench.steps.map((step) => step.inputs), second.testBench.steps.map((step) => step.inputs));
+  assert.match(first.status, /Seed: 12345/);
+});
+
+test('test results CSV exports expected, actual, and safely escaped failure text', () => {
+  const panel = createPanel([
+    { id: 'input', type: 'INPUT', label: 'Request, A' },
+    { id: 'output', type: 'OUTPUT', label: 'Ready' }
+  ], []);
+  panel.testBench = { name: 'Cases', steps: [{
+    inputs: { input: true }, expected: { output: true }, actual: { output: false },
+    result: false, failure: 'Ready expected HIGH, got LOW'
+  }] };
+
+  const csv = panel.buildTestBenchCsv();
+
+  assert.match(csv, /"Input: Request, A"/);
+  assert.match(csv, /"Expected: Ready","Actual: Ready"/);
+  assert.match(csv, /"FAIL","Ready expected HIGH, got LOW"/);
+});
+
+test('test-bench CSV import restores labelled scalar and bus vectors with clock markers', () => {
+  const panel = createPanel([
+    { id: 'request', type: 'INPUT', label: 'Request, A' },
+    { id: 'data', type: 'BUS_INPUT', label: 'Data', width: 4 },
+    { id: 'ready', type: 'OUTPUT', label: 'Ready' },
+    { id: 'result', type: 'BUS_OUTPUT', label: 'Result', width: 4 }
+  ], []);
+  panel.testBench = { name: 'Round trip', steps: [{
+    inputs: { request: true, data: 10 },
+    expected: { ready: false, result: 5 },
+    actual: { ready: true, result: 3 },
+    result: false,
+    clock: true,
+    failure: 'quoted "CSV", details'
+  }] };
+
+  const vectors = panel.parseTestBenchCsv(panel.buildTestBenchCsv());
+
+  assert.deepEqual(vectors, [{
+    inputs: { request: true, data: 10 },
+    expected: { ready: false, result: 5 },
+    clock: true
+  }]);
+});
+
+test('test-bench CSV import rejects mismatched bus values and malformed rows', () => {
+  const panel = createPanel([
+    { id: 'data', type: 'BUS_INPUT', label: 'Data', width: 4 },
+    { id: 'result', type: 'BUS_OUTPUT', label: 'Result', width: 4 }
+  ], []);
+
+  assert.throws(() => panel.parseTestBenchCsv(
+    '"Test","Clock","Input: Data","Expected: Result"\r\n"1","","1010 (9)","0001 (1)"'
+  ), /Invalid 4-bit bus value/);
+  assert.throws(() => panel.parseTestBenchCsv(
+    '"Test","Clock","Input: Data","Expected: Result"\r\n"1","","0001 (1)"'
+  ), /fields; expected/);
+  assert.throws(() => panel.parseTestBenchCsv('"Test,Clock'), /ends inside a quoted field/);
+});
+
+test('test-bench CSV import appends vectors atomically and reports parse failures', async () => {
+  const panel = createPanel([
+    { id: 'input', type: 'INPUT', label: 'A' },
+    { id: 'output', type: 'OUTPUT', label: 'Y' }
+  ], []);
+  panel.testBench = { name: 'Existing', steps: [{ inputs: { input: false }, expected: { output: false } }] };
+  const fileInput = { value: 'selected.csv' };
+  panel.el = { querySelector: (selector) => selector === '[data-testbench-csv-file]' ? fileInput : null };
+  panel.invalidateTestBenchResults = () => {};
+  panel.persistTestBenches = () => {};
+  panel.renderTestBenchSteps = () => {};
+  panel.setStatus = (message) => { panel.status = message; };
+  const file = (csv) => ({ size: csv.length, text: async () => csv });
+  const valid = '"Test","Clock","Input: A","Expected: Y","Actual: Y","Result","Failure"\r\n"1","","HIGH (1)","HIGH (1)","HIGH (1)","PASS",""';
+  const invalid = '"Test","Clock","Input: A","Expected: Y"\r\n"1","","INVALID","LOW (0)"';
+
+  assert.equal(await panel.importTestBenchCsv(file(valid)), true);
+  assert.equal(panel.testBench.steps.length, 2);
+  assert.deepEqual(panel.testBench.steps[1], {
+    inputs: { input: true }, expected: { output: true }, clock: false
+  });
+  assert.equal(fileInput.value, '');
+
+  assert.equal(await panel.importTestBenchCsv(file(invalid)), false);
+  assert.equal(panel.testBench.steps.length, 2);
+  assert.match(panel.status, /Invalid logic value/);
+  assert.equal(fileInput.value, '');
+});
+
+test('boundary generation includes zero, maximum, alternating-low, and alternating-high patterns', () => {
+  const panel = createPanel([
+    { id: 'bus', type: 'BUS_INPUT', label: 'DATA', width: 4, value: 0 },
+    { id: 'output', type: 'BUS_OUTPUT', label: 'Y', width: 4 }
+  ], []);
+  panel.testBench = { name: 'Boundary', steps: [] };
+  panel.el = { querySelector: () => ({ value: 'Boundary' }) };
+  panel.persistTestBenches = () => {};
+  panel.renderTestBenchSteps = () => {};
+  panel.setStatus = (message) => { panel.status = message; };
+
+  assert.equal(panel.generateTestVectors('boundary'), 4);
+  assert.deepEqual(panel.testBench.steps.map((step) => step.inputs.bus), [0, 15, 5, 10]);
 });
 
 test('VCD export encodes scalar and bus waveforms with sample timestamps', () => {
@@ -516,6 +718,63 @@ test('learning challenges load as unwired starters instead of solved circuits', 
     assert.equal(panel.wires.length, 0, `lesson ${lessonIndex + 1} should require wiring`);
     assert.equal(controls['[data-chip-learning-modal]'].hidden, true);
   }
+});
+
+test('learning challenge attempts persist progressive scores and completion', () => {
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, String(value))
+  } });
+  try {
+    const panel = createPanel([
+      { id: 'a', type: 'INPUT', value: false },
+      { id: 'b', type: 'INPUT', value: false },
+      { id: 'and', type: 'AND' },
+      { id: 'y', type: 'OUTPUT' }
+    ], []);
+    panel.learningLessonIndex = 0;
+    panel.learningProgress = [];
+    panel.learningStats = {};
+    panel.learningHintCount = 1;
+    panel.renderLearningPath = () => {};
+    panel.render = () => {};
+    panel.setStatus = (message) => { panel.status = message; };
+    panel.el = { querySelector: () => ({ textContent: '' }) };
+
+    assert.equal(panel.checkLearningLesson(), false);
+    assert.equal(panel.learningStats['and-gate'].attempts, 1);
+    panel.wires = [
+      { from: 'a', output: 0, to: 'and', input: 0 },
+      { from: 'b', output: 0, to: 'and', input: 1 },
+      { from: 'and', output: 0, to: 'y', input: 0 }
+    ];
+
+    assert.equal(panel.checkLearningLesson(), true);
+    assert.deepEqual(panel.learningStats['and-gate'], { attempts: 2, bestScore: 75 });
+    assert.deepEqual(panel.learningProgress, ['and-gate']);
+    assert.deepEqual(JSON.parse(values.get('electroDesigner.chipLab.learningStats')), {
+      'and-gate': { attempts: 2, bestScore: 75 }
+    });
+    assert.deepEqual(JSON.parse(values.get('electroDesigner.chipLab.learningProgress')), ['and-gate']);
+  } finally {
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else delete globalThis.localStorage;
+  }
+});
+
+test('passing to the next learning challenge starts the next lesson', () => {
+  const panel = createPanel([], []);
+  let loaded = 0;
+  panel.learningLessonIndex = 0;
+  panel.renderLearningPath = () => {};
+  panel.loadLearningLesson = () => { loaded += 1; };
+
+  panel.nextLearningLesson();
+
+  assert.equal(panel.learningLessonIndex, 1);
+  assert.equal(loaded, 1);
 });
 
 test('component search matches placed components and their connected signal labels', () => {
