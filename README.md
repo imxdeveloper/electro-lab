@@ -112,10 +112,24 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
    - Scrubbable 250-frame animation timeline.
    - Press **<kbd>I</kbd>** to insert keyframes (Location, Rotation, Scale).
    - <kbd>Spacebar</kbd> to Play / Pause with automatic interpolation.
+   - Use **View → Animation Timeline** to show or hide the bottom timeline.
+   - The View menu controls the tool shelf, Properties / Outliner sidebar, viewport information, navigation gizmo, Circuit Lab tools, Design Library, Board Tools, and Code Editor. Use **Show All Panels** to restore the main workspace panels.
 
 8. **Export & Import**:
    - Export models to **GLTF / GLB**, **OBJ**, and **STL**.
    - Drag & drop 3D files directly into the viewport or use File → Import.
+
+9. **Chip Lab — Digital Logic Design**:
+   - Choose **Chip Lab** from the workspace selector to open a dedicated schematic editor.
+   - Build with scalar Boolean gates, constants, clock sources, rising-edge D/SR flip-flops, bus registers, enabled counters, clock dividers, and a four-word synchronous RAM.
+   - Use 2/4/8-bit bus inputs and outputs, splitters/joiners, bitwise logic, multiplexers, adders with carry-in/out, comparators, and configurable 2-to-4, 3-to-8, or 4-to-16 decoders. Bus connections must match in width; splitter bit 0 is the least-significant bit.
+   - Simulate combinational logic live, manually pulse or automatically run clocked logic, set the clock period, and inspect signal waveforms (up to 48 captured transitions).
+   - Run circuit checks for floating inputs, undriven outputs, incompatible nets, unresolved feedback, and unused logic. Use **Undo/Redo**, **Tidy**, **Fit view**, mouse-wheel zoom, and middle/right-drag pan to edit and navigate schematics. Select wires to assign labels and curved, orthogonal, or straight routing.
+   - Create persistent test benches with input vectors, expected outputs, and optional clock edges. Create reusable combinational subcircuits from a selected closed block, edit their internals, and nest saved reusable chips.
+   - The **Learning path** provides five guided exercises: AND logic, half adders, bus multiplexers, decoders, and clocked registers. Lesson completion is saved in the browser.
+   - Import/export editable `.chip.json` designs. Version 4 saves component state, RAM contents, test benches, and wire labels/routing; versions 1–3 remain importable.
+   - Import a deliberately limited Verilog subset: one module with a plain port list, separate scalar or 2/4/8-bit declarations, and continuous assignments using Boolean/vector operators, literals, and conditional expressions. Sequential `always` blocks, ANSI-style port declarations, and general Verilog are not supported. Export supports only combinational designs and reports unsupported components instead of silently omitting them.
+   - Clocked behavior is a functional digital-logic simulation, not a physical silicon, propagation-delay, or electrical model.
 =======
 # Functions For Fun
 Use Shift + Q function to find subatomic compounds 

@@ -82,8 +82,18 @@ export class TopHeader {
               <button data-action="frame-selected">Frame Selected <span class="shortcut">.</span></button>
               <button data-action="frame-all">Frame All <span class="shortcut">Home</span></button>
               <div class="menu-divider"></div>
-              <button data-action="toggle-sidebar">Toggle Sidebar <span class="shortcut">N</span></button>
-              <button data-action="toggle-toolbar">Toggle Toolbar <span class="shortcut">T</span></button>
+              <div class="menu-sub-header">Interface panels</div>
+              <button data-action="toggle-sidebar" data-view-toggle="sidebar">Properties &amp; Outliner <span class="view-check">✓</span><span class="shortcut">N</span></button>
+              <button data-action="toggle-toolbar" data-view-toggle="toolbar">Tool Shelf <span class="view-check">✓</span><span class="shortcut">T</span></button>
+              <button data-action="toggle-animation" data-view-toggle="animation">Animation Timeline <span class="view-check">✓</span></button>
+              <button data-action="toggle-viewport-info" data-view-toggle="viewportInfo">Viewport Information <span class="view-check">✓</span></button>
+              <button data-action="toggle-navigation-gizmo" data-view-toggle="navigationGizmo">Navigation Gizmo <span class="view-check">✓</span></button>
+              <button data-action="toggle-circuit-tools" data-view-toggle="circuitTools">Circuit Lab Tools <span class="view-check">✓</span><span class="shortcut">F2</span></button>
+              <button data-action="toggle-design-library" data-view-toggle="designLibrary">Design Library <span class="view-check">✓</span></button>
+              <button data-action="toggle-board-tools" data-view-toggle="boardTools">Board Tools <span class="view-check">✓</span></button>
+              <button data-action="toggle-code-editor" data-view-toggle="codeEditor">Code Editor <span class="view-check">✓</span><span class="shortcut">F4</span></button>
+              <div class="menu-divider"></div>
+              <button data-action="show-all-panels">Show All Panels</button>
             </div>
           </div>
 
@@ -101,6 +111,7 @@ export class TopHeader {
           <select id="workspace-mode-select" aria-label="Workspace mode">
             <option value="atoms">Atom Lab</option>
             <option value="circuits">Circuit Lab</option>
+            <option value="chips">Chip Lab</option>
           </select>
         </div>
         <!-- Mode Switcher -->
@@ -140,7 +151,7 @@ export class TopHeader {
       </div>
     `;
 
-    this.container.appendChild(this.el);
+    this.container.insertBefore(this.el, this.container.firstChild);
 
     // Hidden file input for importing 3D models
     this.fileInput = document.createElement('input');
@@ -155,12 +166,14 @@ export class TopHeader {
     const menuItems = this.el.querySelectorAll('.menu-item');
     menuItems.forEach((item) => {
       item.addEventListener('click', (e) => {
+        if (e.target.closest('button[data-action]')) return;
         e.stopPropagation();
         const isOpen = item.classList.contains('open');
         this.closeAllMenus();
         if (!isOpen) {
           item.classList.add('open');
           this.activeMenu = item;
+          if (item.dataset.menu === 'view') this.updateViewMenuState();
         }
       });
 
@@ -339,6 +352,30 @@ export class TopHeader {
       case 'toggle-toolbar':
         this.editor.toggleToolbar();
         break;
+      case 'toggle-animation':
+        this.editor.toggleAnimationTimeline();
+        break;
+      case 'toggle-viewport-info':
+        this.editor.toggleViewportInformation();
+        break;
+      case 'toggle-navigation-gizmo':
+        this.editor.toggleNavigationGizmo();
+        break;
+      case 'toggle-circuit-tools':
+        this.editor.toggleCircuitTools();
+        break;
+      case 'toggle-design-library':
+        this.editor.toggleDesignLibrary();
+        break;
+      case 'toggle-board-tools':
+        this.editor.boardPanel.el.hidden = !this.editor.boardPanel.el.hidden;
+        break;
+      case 'toggle-code-editor':
+        this.editor.codeEditorPanel.setOpen(this.editor.codeEditorPanel.el.hidden);
+        break;
+      case 'show-all-panels':
+        this.editor.showAllPanels();
+        break;
       case 'shortcuts':
         this.editor.shortcutsModal.open();
         break;
@@ -358,5 +395,24 @@ export class TopHeader {
   updateWorkspaceMode(mode) {
     const selector = this.el.querySelector('#workspace-mode-select');
     if (selector) selector.value = mode;
+  }
+
+  updateViewMenuState() {
+    const visibility = {
+      sidebar: this.editor.sidebarVisible,
+      toolbar: this.editor.toolbar.visible,
+      animation: !this.editor.timelineUI.el.hidden,
+      viewportInfo: !this.editor.infoOverlay.hidden,
+      navigationGizmo: this.editor.navigationGizmoVisible,
+      circuitTools: this.editor.circuitDockVisible,
+      designLibrary: !this.editor.designPanel.hidden,
+      boardTools: !this.editor.boardPanel.el.hidden,
+      codeEditor: !this.editor.codeEditorPanel.el.hidden
+    };
+    this.el.querySelectorAll('[data-view-toggle]').forEach((button) => {
+      const visible = visibility[button.dataset.viewToggle];
+      button.setAttribute('aria-pressed', String(visible));
+      button.classList.toggle('view-item-hidden', !visible);
+    });
   }
 }

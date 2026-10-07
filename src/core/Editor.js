@@ -30,6 +30,7 @@ import { PreferencesModal } from '../ui/PreferencesModal.js';
 import { ShortcutsModal } from '../ui/ShortcutsModal.js';
 import { CodeEditorPanel } from '../ui/CodeEditorPanel.js';
 import { BoardPanel } from '../ui/BoardPanel.js';
+import { ChipLabPanel } from '../ui/ChipLabPanel.js';
 
 export class Editor {
   constructor(rootContainer) {
@@ -37,6 +38,7 @@ export class Editor {
     this.geometryUtils = GeometryUtils;
     this.workspaceMode = 'atoms';
     this.circuitDockVisible = false;
+    this.navigationGizmoVisible = true;
 
     this.sidebarVisible = true;
     this.lastMouseClientX = window.innerWidth / 2;
@@ -46,25 +48,28 @@ export class Editor {
     this.initComponents();
     this.codeEditorPanel = new CodeEditorPanel(this);
     this.boardPanel = new BoardPanel(this);
+    this.chipLabPanel = new ChipLabPanel(this);
     this.bindGlobalEvents();
     this.startLoop();
   }
 
   setWorkspaceMode(mode) {
-    if (!['atoms', 'circuits'].includes(mode) || this.workspaceMode === mode) return;
+    if (!['atoms', 'circuits', 'chips'].includes(mode) || this.workspaceMode === mode) return;
     this.setCircuitToolMode?.(null);
     this.workspaceMode = mode;
     this.sceneManager.updateWorkspaceBackground();
     this.root.classList.toggle('circuit-workspace', mode === 'circuits');
+    this.root.classList.toggle('chip-workspace', mode === 'chips');
     this.topHeader?.updateWorkspaceMode(mode);
     this.addMenuModal?.setWorkspaceMode(mode);
-    if (mode === 'circuits') {
+    if (mode === 'circuits' || mode === 'chips') {
       this.addMenuModal?.close();
       this.compoundMenuModal?.close();
       this.electronFieldMenuModal?.close();
       this.magneticCompoundMenuModal?.close();
     }
     const circuitMode = mode === 'circuits';
+    const chipMode = mode === 'chips';
     if (circuitMode) {
       // Clear previously placed MOS logic gates and their attached connections.
       for (const object of [...this.sceneManager.objectsList]) {
@@ -94,12 +99,12 @@ export class Editor {
       this.selectionManager.clearSelection();
     }
     for (const object of this.sceneManager.objectsList) {
-      object.visible = circuitMode ? Boolean(object.userData?.circuitComponent) : !object.userData?.circuitComponent;
+      object.visible = chipMode ? false : circuitMode ? Boolean(object.userData?.circuitComponent) : !object.userData?.circuitComponent;
     }
-    this.sceneManager.gridHelper.visible = true;
-    this.sceneManager.axisLineX.visible = !circuitMode;
-    this.sceneManager.axisLineY.visible = !circuitMode;
-    this.sceneManager.cursorGroup.visible = !circuitMode;
+    this.sceneManager.gridHelper.visible = !chipMode;
+    this.sceneManager.axisLineX.visible = !circuitMode && !chipMode;
+    this.sceneManager.axisLineY.visible = !circuitMode && !chipMode;
+    this.sceneManager.cursorGroup.visible = !circuitMode && !chipMode;
     if (circuitMode) {
       const camera = this.sceneManager.activeCamera;
       camera.position.set(0, 24, 0);
@@ -116,11 +121,12 @@ export class Editor {
       this.navigation.updateSphericalFromCamera();
       this._atomCameraState = null;
     }
-    this.circuitDock.classList.toggle('active', this.circuitDockVisible);
+    this.circuitDock.classList.toggle('active', this.circuitDockVisible && circuitMode);
     this.circuitDock.classList.toggle('circuit-mode-active', circuitMode);
-    this.circuitDock.style.display = this.circuitDockVisible ? 'block' : 'none';
+    this.circuitDock.style.display = this.circuitDockVisible && circuitMode ? 'block' : 'none';
     const dockMode = this.circuitDock.querySelector('select');
     if (dockMode) dockMode.value = mode;
+    this.chipLabPanel?.setActive(chipMode);
     this.updateHUDText();
     requestAnimationFrame(() => {
       this.sceneManager.onResize();
@@ -173,7 +179,7 @@ export class Editor {
         <section class="circuit-section">
           <h2><span>Workspace</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-workspace-controls" title="Minimize workspace controls">âˆ’</button></h2>
           <label id="circuit-workspace-controls" class="circuit-mode-control">
-            <select aria-label="Workspace mode"><option value="circuits">Circuit Lab</option><option value="atoms" selected>Atom Lab</option></select>
+            <select aria-label="Workspace mode"><option value="atoms">Atom Lab</option><option value="circuits">Circuit Lab</option><option value="chips">Chip Lab</option></select>
           </label>
         </section>
         <section class="circuit-section circuit-only-section">
@@ -401,9 +407,7 @@ export class Editor {
       if (event.code !== 'F2') return;
       if (['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) return;
       event.preventDefault();
-      this.circuitDockVisible = !this.circuitDockVisible;
-      this.circuitDock.style.display = this.circuitDockVisible ? 'block' : 'none';
-      this.circuitDock.classList.toggle('active', this.circuitDockVisible);
+      this.toggleCircuitTools();
     });
     this.designPanel.querySelector('[data-design-close]').addEventListener('click', () => {
       this.designPanel.hidden = true;
@@ -580,6 +584,48 @@ export class Editor {
   toggleToolbar() {
     this.toolbar.toggle();
     this.sceneManager.onResize();
+  }
+
+  toggleAnimationTimeline() {
+    this.timelineUI.el.hidden = !this.timelineUI.el.hidden;
+    this.sceneManager.onResize();
+    this.sceneManager.render();
+  }
+
+  toggleViewportInformation() {
+    this.infoOverlay.hidden = !this.infoOverlay.hidden;
+  }
+
+  toggleNavigationGizmo() {
+    this.navigationGizmoVisible = !this.navigationGizmoVisible;
+    this.navGizmo.wrapper.style.display = this.navigationGizmoVisible ? '' : 'none';
+  }
+
+  toggleCircuitTools() {
+    this.circuitDockVisible = !this.circuitDockVisible;
+    const visible = this.circuitDockVisible && this.workspaceMode === 'circuits';
+    this.circuitDock.style.display = visible ? 'block' : 'none';
+    this.circuitDock.classList.toggle('active', visible);
+  }
+
+  toggleDesignLibrary() {
+    this.designPanel.hidden = !this.designPanel.hidden;
+    if (!this.designPanel.hidden) this.renderCircuitDesignList();
+  }
+
+  showAllPanels() {
+    this.setSidebarVisible(true);
+    if (!this.toolbar.visible) this.toggleToolbar();
+    this.timelineUI.el.hidden = false;
+    this.infoOverlay.hidden = false;
+    this.navigationGizmoVisible = true;
+    this.navGizmo.wrapper.style.display = '';
+    this.circuitDockVisible = true;
+    const showCircuitTools = this.workspaceMode === 'circuits';
+    this.circuitDock.style.display = showCircuitTools ? 'block' : 'none';
+    this.circuitDock.classList.toggle('active', showCircuitTools);
+    this.sceneManager.onResize();
+    this.sceneManager.render();
   }
 
   setSmoothShading(isSmooth) {
