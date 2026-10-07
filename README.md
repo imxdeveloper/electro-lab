@@ -120,4 +120,3 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
 =======
 # electro-lab
 Electro Lab is 3D design tool for matter and logic on Web UI for everyone 
->>>>>>> 3017dbc87a7fc2fabd1c2c8996e14f3efebd01fc
