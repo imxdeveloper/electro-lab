@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Electro Designer Web 3D Editor 🎨
 
 A browser-based 3D workspace for exploring atoms and molecules, building circuit layouts, and modeling objects. Built with Three.js and WebGL, it includes editable 3D objects, viewport navigation, an animation timeline, and an Atom Lab / Circuit Lab workspace switch.
@@ -116,3 +117,7 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
 8. **Export & Import**:
    - Export models to **GLTF / GLB**, **OBJ**, and **STL**.
    - Drag & drop 3D files directly into the viewport or use File → Import.
+=======
+# electro-lab
+Electro Lab is 3D design tool for matter and logic on Web UI for everyone 
+>>>>>>> 3017dbc87a7fc2fabd1c2c8996e14f3efebd01fc
