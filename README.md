@@ -118,5 +118,5 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
    - Export models to **GLTF / GLB**, **OBJ**, and **STL**.
    - Drag & drop 3D files directly into the viewport or use File → Import.
 =======
-# electro-lab
+# Electro-Lab for EveryOne
 Electro Lab is 3D design tool for matter and logic on Web UI for everyone 
