@@ -165,6 +165,7 @@ export class ChipLabPanel {
         <main class="chip-design-area">
           <div class="chip-toolbar">
             <div class="chip-breadcrumb"><span>PROJECT</span><b data-chip-title>Untitled Logic Chip</b><span class="chip-rev">REV A</span></div>
+            <label class="chip-design-search"><span>FIND</span><input type="search" data-chip-find placeholder="Component or signal…" autocomplete="off" aria-label="Find a component or signal"><div data-chip-find-results hidden></div></label>
             <div class="chip-canvas-actions">
               <button type="button" data-chip-action="undo" title="Undo (Ctrl+Z)">Undo</button>
               <button type="button" data-chip-action="redo" title="Redo (Ctrl+Y)">Redo</button>
@@ -172,6 +173,10 @@ export class ChipLabPanel {
               <button type="button" data-chip-action="paste" title="Paste copied components (Ctrl+V)">Paste</button>
               <button type="button" data-chip-action="grid-snap" class="active" title="Toggle 20-unit grid snapping">Snap: On</button>
               <button type="button" data-chip-action="group" title="Toggle multi-select">Select group</button>
+              <button type="button" data-chip-action="align-x" title="Align selected components horizontally">Align X</button>
+              <button type="button" data-chip-action="align-y" title="Align selected components vertically">Align Y</button>
+              <button type="button" data-chip-action="distribute-x" title="Distribute selected components horizontally">Space X</button>
+              <button type="button" data-chip-action="distribute-y" title="Distribute selected components vertically">Space Y</button>
               <button type="button" data-chip-action="back-chip" hidden>Back</button>
               <button type="button" data-chip-action="save-chip-edits" hidden>Save chip</button>
               <button type="button" data-chip-action="fit" title="Fit schematic">Fit view</button>
@@ -303,6 +308,7 @@ export class ChipLabPanel {
       }
     });
     this.el.addEventListener('input', (event) => {
+      if (event.target.matches('[data-chip-find]')) this.renderFindResults(event.target.value);
       if (event.target.matches('[data-chip-name]')) {
         this.chipName = event.target.value.trim() || 'Untitled Logic Chip';
         this.el.querySelector('[data-chip-title]').textContent = this.chipName;
@@ -355,6 +361,17 @@ export class ChipLabPanel {
         this.renderTestBenchSteps();
       }
     });
+    this.el.querySelector('[data-chip-find]').addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      const match = this.findDesignItems(event.currentTarget.value)[0];
+      if (!match) return;
+      event.preventDefault();
+      this.focusFoundItem({
+        findKind: match.kind,
+        findId: match.id || '',
+        findIndex: match.index === undefined ? '' : String(match.index)
+      });
+    });
     this.el.querySelector('[data-chip-file]').addEventListener('change', (event) => this.importDesign(event.target.files?.[0]));
     this.el.querySelector('[data-chip-hdl-file]').addEventListener('change', (event) => this.importVerilog(event.target.files?.[0]));
     this.el.addEventListener('focusin', (event) => {
@@ -387,8 +404,12 @@ export class ChipLabPanel {
       const node = this.nodes.find((entry) => entry.id === nodeElement.dataset.nodeId);
       if (!node) return;
       const point = this.svgPoint(event);
+      const moveIds = this.selectedNodeIds.has(node.id) && this.selectedNodeIds.size > 1
+        ? [...this.selectedNodeIds]
+        : [node.id];
       this.dragState = {
         node,
+        moveIds,
         x: point.x - node.x,
         y: point.y - node.y,
         pointerSvgX: point.x,
@@ -421,11 +442,21 @@ export class ChipLabPanel {
       const point = this.svgPoint(event);
       const dx = point.x - this.dragState.pointerSvgX;
       const dy = point.y - this.dragState.pointerSvgY;
-      const original = this.dragState.before.nodes.find((entry) => entry.id === this.dragState.node.id);
-      const snap = (coordinate, maximum) => Math.max(20, Math.min(maximum,
-        this.gridSnap ? Math.round(coordinate / 20) * 20 : Math.round(coordinate)));
-      this.dragState.node.x = snap((original?.x || 0) + dx, 1030);
-      this.dragState.node.y = snap((original?.y || 0) + dy, 630);
+      const originals = this.dragState.before.nodes.filter((entry) => this.dragState.moveIds.includes(entry.id));
+      const snapDelta = (delta) => this.gridSnap ? Math.round(delta / 20) * 20 : Math.round(delta);
+      let moveX = snapDelta(dx);
+      let moveY = snapDelta(dy);
+      moveX = Math.max(-Math.min(...originals.map((entry) => entry.x)) + 20,
+        Math.min(1030 - Math.max(...originals.map((entry) => entry.x)), moveX));
+      moveY = Math.max(-Math.min(...originals.map((entry) => entry.y)) + 20,
+        Math.min(630 - Math.max(...originals.map((entry) => entry.y)), moveY));
+      for (const original of originals) {
+        const current = this.nodes.find((entry) => entry.id === original.id);
+        if (current) {
+          current.x = original.x + moveX;
+          current.y = original.y + moveY;
+        }
+      }
       this.renderCanvas();
     });
     canvas.addEventListener('pointerup', () => {
@@ -434,11 +465,15 @@ export class ChipLabPanel {
         this.dragState = null;
         return;
       }
-      const { node, moved, multiSelect, before } = this.dragState;
+      const { node, moved, multiSelect, moveIds, before } = this.dragState;
       this.dragState = null;
       if (moved) {
         this.commitHistory(before);
-        this.selectNode(node.id, multiSelect);
+        if (moveIds.length > 1) {
+          this.selectedNodeId = node.id;
+          this.selectedNodeIds = new Set(moveIds);
+          this.render();
+        } else this.selectNode(node.id, multiSelect);
       } else if (multiSelect) {
         this.selectNode(node.id, true);
       }
@@ -508,6 +543,11 @@ export class ChipLabPanel {
     if (action === 'undo') this.undo();
     if (action === 'redo') this.redo();
     if (action === 'tidy') this.tidyLayout();
+    if (action === 'align-x') this.alignSelection('x');
+    if (action === 'align-y') this.alignSelection('y');
+    if (action === 'distribute-x') this.distributeSelection('x');
+    if (action === 'distribute-y') this.distributeSelection('y');
+    if (action === 'focus-found-item') this.focusFoundItem(detail);
     if (action === 'truth') this.showTruthTable();
     if (action === 'close-truth') this.el.querySelector('[data-chip-truth-modal]').hidden = true;
     if (action === 'simulate') {
@@ -955,6 +995,108 @@ export class ChipLabPanel {
     this.fitCanvas();
     this.runSimulation();
     this.setStatus(`Arranged ${this.nodes.length} components by signal flow.`);
+  }
+
+  alignSelection(axis) {
+    const selected = this.nodes.filter((node) => this.selectedNodeIds.has(node.id));
+    if (selected.length < 2) {
+      this.setStatus('Select at least two components to align them.');
+      return false;
+    }
+    this.commitHistory();
+    const coordinate = axis === 'x' ? 'y' : 'x';
+    const target = selected[0][coordinate];
+    selected.slice(1).forEach((node) => { node[coordinate] = target; });
+    this.render();
+    this.setStatus(`Aligned ${selected.length} selected components on the ${axis === 'x' ? 'horizontal' : 'vertical'} axis.`);
+    return true;
+  }
+
+  distributeSelection(axis) {
+    const selected = this.nodes.filter((node) => this.selectedNodeIds.has(node.id));
+    if (selected.length < 3) {
+      this.setStatus('Select at least three components to distribute them evenly.');
+      return false;
+    }
+    const coordinate = axis === 'x' ? 'x' : 'y';
+    const ordered = [...selected].sort((a, b) => a[coordinate] - b[coordinate]);
+    const first = ordered[0][coordinate];
+    const last = ordered.at(-1)[coordinate];
+    if (last === first) {
+      this.setStatus('Move the first or last selected component apart before distributing.');
+      return false;
+    }
+    this.commitHistory();
+    const step = (last - first) / (ordered.length - 1);
+    ordered.slice(1, -1).forEach((node, index) => {
+      node[coordinate] = this.gridSnap ? Math.round((first + step * (index + 1)) / 20) * 20
+        : Math.round(first + step * (index + 1));
+    });
+    this.render();
+    this.setStatus(`Evenly spaced ${selected.length} components along the ${axis === 'x' ? 'horizontal' : 'vertical'} axis.`);
+    return true;
+  }
+
+  findDesignItems(query) {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return [];
+    const matches = [];
+    for (const node of this.nodes) {
+      if (`${node.label} ${node.type} ${node.id}`.toLowerCase().includes(normalized)) {
+        matches.push({ kind: 'component', id: node.id, label: node.label, detail: node.type });
+      }
+    }
+    for (let index = 0; index < this.wires.length; index += 1) {
+      const wire = this.wires[index];
+      const source = this.nodes.find((node) => node.id === wire.from);
+      const target = this.nodes.find((node) => node.id === wire.to);
+      const label = wire.label || `${source?.label || wire.from} → ${target?.label || wire.to}`;
+      if (`${label} ${source?.label || ''} ${target?.label || ''}`.toLowerCase().includes(normalized)) {
+        matches.push({ kind: 'signal', index, label, detail: 'Signal net' });
+      }
+    }
+    return matches.slice(0, 8);
+  }
+
+  renderFindResults(query) {
+    const list = this.el.querySelector('[data-chip-find-results]');
+    const matches = this.findDesignItems(query);
+    list.hidden = !query.trim();
+    list.innerHTML = matches.length
+      ? matches.map((item) => `<button type="button" data-chip-action="focus-found-item" data-find-kind="${item.kind}" data-find-id="${escapeHTML(item.id || '')}" data-find-index="${item.index ?? ''}"><b>${escapeHTML(item.label)}</b><small>${escapeHTML(item.detail)}</small></button>`).join('')
+      : query.trim() ? '<p>No matching components or signals.</p>' : '';
+  }
+
+  focusFoundItem(detail) {
+    const canvas = this.el.querySelector('.chip-canvas');
+    if (detail.findKind === 'signal') {
+      const index = Number(detail.findIndex);
+      const wire = this.wires[index];
+      const source = wire && this.nodes.find((node) => node.id === wire.from);
+      const target = wire && this.nodes.find((node) => node.id === wire.to);
+      if (!wire || !source || !target) return;
+      this.selectedWireIndex = index;
+      this.selectedNodeId = null;
+      this.selectedNodeIds.clear();
+      const left = Math.min(source.x, target.x);
+      const top = Math.min(source.y, target.y);
+      canvas.setAttribute('viewBox', `${left - 30} ${top - 35} ${Math.max(420, Math.abs(source.x - target.x) + 220)} ${Math.max(180, Math.abs(source.y - target.y) + 120)}`);
+      this.render();
+      this.setStatus(`Focused signal "${wire.label || `${source.label} → ${target.label}`}".`);
+    } else {
+      const node = this.nodes.find((entry) => entry.id === detail.findId);
+      if (!node) return;
+      this.selectedWireIndex = null;
+      this.selectedNodeId = node.id;
+      this.selectedNodeIds = new Set([node.id]);
+      canvas.setAttribute('viewBox', `${node.x - 140} ${node.y - 90} 440 ${Math.max(220, this.nodeHeight(node) + 180)}`);
+      this.render();
+      this.setTab('inspect');
+      this.setStatus(`Focused component "${node.label}".`);
+    }
+    const search = this.el.querySelector('[data-chip-find]');
+    search.value = '';
+    this.renderFindResults('');
   }
 
   selectNode(nodeId, multiSelect = false) {

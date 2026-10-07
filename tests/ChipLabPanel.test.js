@@ -518,6 +518,39 @@ test('learning challenges load as unwired starters instead of solved circuits', 
   }
 });
 
+test('component search matches placed components and their connected signal labels', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'START', x: 20, y: 30 },
+    { id: 'gate', type: 'AND', label: 'Guard logic', x: 200, y: 30 },
+    { id: 'out', type: 'OUTPUT', label: 'ACTIVE', x: 400, y: 30 }
+  ], [
+    { from: 'a', output: 0, to: 'gate', input: 0, label: 'start_request' },
+    { from: 'gate', output: 0, to: 'out', input: 0 }
+  ]);
+
+  assert.deepEqual(panel.findDesignItems('guard').filter(({ kind }) => kind === 'component').map(({ id }) => id), ['gate']);
+  assert.deepEqual(panel.findDesignItems('START_REQUEST').map(({ kind, index }) => [kind, index]), [['signal', 0]]);
+  assert.deepEqual(panel.findDesignItems('missing'), []);
+});
+
+test('align and distribute selected components preserve their ordering', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', x: 20, y: 40 },
+    { id: 'b', type: 'AND', x: 120, y: 190 },
+    { id: 'c', type: 'OUTPUT', x: 420, y: 300 }
+  ], []);
+  panel.selectedNodeIds = new Set(['a', 'b', 'c']);
+  panel.gridSnap = false;
+  panel.commitHistory = () => {};
+  panel.render = () => {};
+  panel.setStatus = (message) => { panel.status = message; };
+
+  assert.equal(panel.alignSelection('x'), true);
+  assert.deepEqual(panel.nodes.map(({ y }) => y), [40, 40, 40]);
+  assert.equal(panel.distributeSelection('x'), true);
+  assert.deepEqual(panel.nodes.map(({ x }) => x), [20, 220, 420]);
+});
+
 test('one-hot state machine advances on its guard and holds when no transition is active', () => {
   const panel = createPanel([], []);
   const controls = {

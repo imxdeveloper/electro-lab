@@ -183,11 +183,19 @@ button, input, select {
 .chip-led,.chip-live-badge i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #4bd28b; box-shadow: 0 0 8px #4bd28b; }
 .chip-design-area { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .chip-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 42px; padding: 0 13px; border-bottom: 1px solid #253244; background: #111925; }
+.chip-design-search { position: relative; display: flex; align-items: center; gap: 6px; min-width: 150px; padding: 4px 7px; border: 1px solid #35445a; border-radius: 5px; color: #8293a8; font: 8px var(--font-mono); }
+.chip-design-search input { width: 150px; min-width: 0; padding: 2px; outline: none; background: transparent; color: #dce5ef; font: 10px var(--font-ui); }
+.chip-design-search input::placeholder { color: #75849a; }
+.chip-design-search > div { position: absolute; z-index: 20; top: calc(100% + 5px); left: 0; display: grid; width: min(300px, 70vw); max-height: 260px; overflow: auto; padding: 4px; border: 1px solid #3a4d65; border-radius: 6px; background: #151e2a; box-shadow: 0 12px 30px #0009; }
+.chip-design-search > div[hidden] { display: none; }
+.chip-design-search > div button { display: grid; gap: 3px; padding: 8px; border-radius: 4px; background: transparent; color: #dce5ef; cursor: pointer; text-align: left; }
+.chip-design-search > div button:hover { background: #20344e; }
+.chip-design-search > div button small,.chip-design-search > div p { color: #8494a9; font-size: 9px; }
 .chip-breadcrumb { display: flex; align-items: center; gap: 9px; color: #8494a9; font-size: 10px; }
 .chip-breadcrumb > span:first-child { color: #65758a; font: 9px var(--font-mono); letter-spacing: .08em; }
 .chip-breadcrumb b { color: #dce5ef; font-size: 11px; font-weight: 550; }
 .chip-rev { padding: 3px 5px; border: 1px solid #344257; border-radius: 3px; font: 8px var(--font-mono); }
-.chip-canvas-actions { display: flex; gap: 6px; }
+.chip-canvas-actions { display: flex; gap: 6px; overflow-x: auto; }
 .chip-canvas-actions button { padding: 5px 8px; font-size: 10px; }
 .chip-canvas-actions button.active { border-color: #6da9ff; background: #24456f; color: #d7e8ff; }
 .chip-canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; background: #101722; }
