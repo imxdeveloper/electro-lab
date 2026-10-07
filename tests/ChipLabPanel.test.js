@@ -434,6 +434,90 @@ test('unprobed waveform rendering includes output signals even when inputs come 
   assert.match(waveforms, /<svg/);
 });
 
+test('undo snapshots restore the project identity and its test bench', () => {
+  const controls = {
+    '[data-chip-name]': { value: '' },
+    '[data-chip-title]': { textContent: '' },
+    '.chip-canvas': {
+      viewBox: '0 0 1200 740',
+      getAttribute() { return this.viewBox; },
+      setAttribute(_name, value) { this.viewBox = value; }
+    }
+  };
+  const panel = createPanel([{ id: 'a', type: 'INPUT', label: 'A', x: 20, y: 30 }], []);
+  panel.el = { querySelector: (selector) => controls[selector] };
+  panel.selectedNodeIds = new Set();
+  panel.selectedNodeId = null;
+  panel.selectedWireIndex = null;
+  panel.chipName = 'Original';
+  panel.designId = 'original-project';
+  panel.testBench = { name: 'Known cases', steps: [{ inputs: { a: true }, expected: {}, clock: false }] };
+  panel.stopClock = () => {};
+  panel.resetTrace = () => {};
+  panel.persistTestBenches = () => {};
+  panel.runSimulation = () => {};
+  const snapshot = panel.snapshotDesign();
+  panel.chipName = 'Changed';
+  panel.designId = 'different-project';
+  panel.testBench = { name: 'Empty', steps: [] };
+
+  panel.restoreSnapshot(snapshot);
+
+  assert.equal(panel.chipName, 'Original');
+  assert.equal(panel.designId, 'original-project');
+  assert.equal(panel.testBench.name, 'Known cases');
+  assert.deepEqual(panel.testBench.steps[0].inputs, { a: true });
+});
+
+test('test bench results render expected and actual values in a pass/fail table', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'A' },
+    { id: 'out', type: 'OUTPUT', label: 'Y' }
+  ], []);
+  const results = { innerHTML: '' };
+  panel.el = { querySelector: (selector) => selector === '[data-testbench-results]' ? results : null };
+  panel.testBench = { name: 'Checks', steps: [
+    { inputs: { a: true }, expected: { out: true }, actual: { out: true }, result: true },
+    { inputs: { a: false }, expected: { out: true }, actual: { out: false }, result: false }
+  ] };
+
+  panel.renderTestBenchResults();
+
+  assert.match(results.innerHTML, /<th>Expected<\/th><th>Actual<\/th><th>Result<\/th>/);
+  assert.match(results.innerHTML, /A=HIGH \(1\)/);
+  assert.match(results.innerHTML, /Y=HIGH \(1\).*Y=LOW \(0\)/);
+  assert.match(results.innerHTML, /class="passed">PASS/);
+  assert.match(results.innerHTML, /class="failed">FAIL/);
+});
+
+test('learning challenges load as unwired starters instead of solved circuits', () => {
+  for (let lessonIndex = 0; lessonIndex < 5; lessonIndex += 1) {
+    const controls = {
+      '[data-chip-name]': { value: '' },
+      '[data-chip-title]': { textContent: '' },
+      '[data-chip-learning-modal]': { hidden: false }
+    };
+    const panel = createPanel([], []);
+    panel.el = { querySelector: (selector) => controls[selector] };
+    panel.learningLessonIndex = lessonIndex;
+    panel.learningProgress = [];
+    panel.selectedNodeIds = new Set();
+    panel.commitHistory = () => {};
+    panel.stopClock = () => {};
+    panel.resetTrace = () => {};
+    panel.render = () => {};
+    panel.runSimulation = () => {};
+    panel.setTab = () => {};
+    panel.setStatus = () => {};
+
+    panel.loadLearningLesson();
+
+    assert.ok(panel.nodes.length > 0, `lesson ${lessonIndex + 1} should provide starter components`);
+    assert.equal(panel.wires.length, 0, `lesson ${lessonIndex + 1} should require wiring`);
+    assert.equal(controls['[data-chip-learning-modal]'].hidden, true);
+  }
+});
+
 test('one-hot state machine advances on its guard and holds when no transition is active', () => {
   const panel = createPanel([], []);
   const controls = {

@@ -213,6 +213,7 @@ export class ChipLabPanel {
         <section><header><div><strong>Test benches</strong><span>Build a sequence of input vectors and expected outputs</span></div><button data-chip-action="close-testbench" aria-label="Close test benches">×</button></header>
           <label>TEST BENCH NAME<input data-testbench-name maxlength="48" value="Untitled test bench"></label>
           <div class="chip-testbench-steps" data-testbench-steps></div>
+          <div class="chip-testbench-results" data-testbench-results aria-live="polite"></div>
           <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button data-chip-action="generate-exhaustive">Generate exhaustive</button><button data-chip-action="generate-random">Add 32 random</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button></footer>
           <p data-testbench-result></p>
         </section>
@@ -220,7 +221,7 @@ export class ChipLabPanel {
       <div class="chip-learning-modal" data-chip-learning-modal hidden>
         <section><header><div><strong>Chip Lab learning path</strong><span>Build and test small circuits, one skill at a time</span></div><button data-chip-action="close-learning" aria-label="Close learning path">×</button></header>
           <div class="chip-learning-layout"><nav data-learning-list></nav><article data-learning-content></article></div>
-          <footer><button data-chip-action="load-lesson">Load lesson circuit</button><button class="chip-primary" data-chip-action="check-lesson">Check my circuit</button></footer>
+          <footer><button data-chip-action="load-lesson">Start challenge</button><button class="chip-primary" data-chip-action="check-lesson">Check my circuit</button></footer>
         </section>
       </div>
       <div class="chip-project-modal" data-chip-project-modal hidden>
@@ -347,9 +348,11 @@ export class ChipLabPanel {
         const { stepIndex, outputId } = event.target.dataset;
         const output = this.nodes.find((node) => node.id === outputId);
         if (!output || !this.testBench.steps[Number(stepIndex)]) return;
+        this.invalidateTestBenchResults();
         this.testBench.steps[Number(stepIndex)].expected[outputId] = output.type === 'BUS_OUTPUT'
           ? Number(event.target.value) : Boolean(Number(event.target.value));
         this.persistTestBenches();
+        this.renderTestBenchSteps();
       }
     });
     this.el.querySelector('[data-chip-file]').addEventListener('change', (event) => this.importDesign(event.target.files?.[0]));
@@ -844,6 +847,8 @@ export class ChipLabPanel {
       nodes: structuredClone(this.nodes),
       wires: structuredClone(this.wires),
       chipName: this.chipName,
+      designId: this.designId,
+      testBench: structuredClone(this.testBench),
       viewBox: this.el.querySelector('.chip-canvas')?.getAttribute('viewBox') || '0 0 1200 740'
     };
   }
@@ -861,6 +866,8 @@ export class ChipLabPanel {
     this.nodes = structuredClone(snapshot.nodes);
     this.wires = structuredClone(snapshot.wires);
     this.chipName = snapshot.chipName;
+    if (typeof snapshot.designId === 'string') this.designId = snapshot.designId;
+    if (snapshot.testBench) this.testBench = structuredClone(snapshot.testBench);
     this.el.querySelector('[data-chip-name]').value = this.chipName;
     this.el.querySelector('[data-chip-title]').textContent = this.chipName;
     this.el.querySelector('.chip-canvas').setAttribute('viewBox', snapshot.viewBox);
@@ -869,6 +876,7 @@ export class ChipLabPanel {
     this.selectedWireIndex = null;
     this.pendingPort = null;
     this.resetTrace();
+    this.persistTestBenches();
     this.runSimulation();
   }
 
@@ -1830,6 +1838,7 @@ export class ChipLabPanel {
       node.id, result.outputs.has(node.id) ? result.outputs.get(node.id) : node.type === 'BUS_OUTPUT' ? 0 : false
     ]));
     this.testBench.name = this.el.querySelector('[data-testbench-name]').value.trim() || 'Untitled test bench';
+    this.invalidateTestBenchResults();
     this.testBench.steps.push({
       inputs: Object.fromEntries(inputs.map((node) => [node.id, node.value])),
       expected,
@@ -1889,6 +1898,7 @@ export class ChipLabPanel {
       steps.push({ inputs: inputValues, expected, clock: false });
     }
     this.testBench.name = this.el.querySelector('[data-testbench-name]').value.trim() || 'Untitled test bench';
+    this.invalidateTestBenchResults();
     this.testBench.steps.push(...steps);
     this.persistTestBenches();
     this.renderTestBenchSteps();
@@ -1899,6 +1909,7 @@ export class ChipLabPanel {
 
   deleteTestBenchStep(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.testBench.steps.length) return;
+    this.invalidateTestBenchResults();
     this.testBench.steps.splice(index, 1);
     this.persistTestBenches();
     this.renderTestBenchSteps();
@@ -1909,6 +1920,7 @@ export class ChipLabPanel {
     this.el.querySelector('[data-testbench-name]').value = this.testBench.name;
     if (!this.testBench.steps.length) {
       list.innerHTML = '<p class="chip-sim-empty">No vectors yet. Set circuit inputs, then add the current vector.</p>';
+      this.renderTestBenchResults();
       return;
     }
     const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
@@ -1923,6 +1935,36 @@ export class ChipLabPanel {
         return `<label>${escapeHTML(node.label)}<select data-testbench-expected data-step-index="${index}" data-output-id="${escapeHTML(node.id)}">${choices.map((value) => `<option value="${value}" ${Number(expected) === value ? 'selected' : ''}>${node.type === 'BUS_OUTPUT' ? value.toString(2).padStart(node.width || 4, '0') : value}</option>`).join('')}</select></label>`;
       }).join('')}</div><small class="chip-testbench-result">${step.result === undefined ? 'Not run' : step.result ? 'PASS' : `FAIL · ${escapeHTML(step.failure || 'Check expected output values.')}`}</small></article>`;
     }).join('');
+    this.renderTestBenchResults();
+  }
+
+  invalidateTestBenchResults() {
+    for (const step of this.testBench.steps) {
+      delete step.result;
+      delete step.failure;
+      delete step.actual;
+    }
+    const summary = this.el.querySelector('[data-testbench-result]');
+    if (summary) summary.textContent = '';
+  }
+
+  renderTestBenchResults() {
+    const panel = this.el.querySelector('[data-testbench-results]');
+    if (!panel) return;
+    const completed = this.testBench.steps.some((step) => typeof step.result === 'boolean');
+    if (!completed) {
+      panel.innerHTML = '<p class="chip-sim-empty">Run the test bench to see expected and actual outputs for every vector.</p>';
+      return;
+    }
+    const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
+    const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const formatValues = (nodes, values) => nodes.map((node) =>
+      `${escapeHTML(node.label)}=${escapeHTML(this.formatTestValue(node, values?.[node.id]))}`
+    ).join(' · ') || '—';
+    panel.innerHTML = `<div class="chip-testbench-results-scroll"><table><thead><tr><th>#</th><th>Inputs</th><th>Expected</th><th>Actual</th><th>Result</th></tr></thead><tbody>${this.testBench.steps.map((step, index) => {
+      const status = step.result === true ? 'PASS' : step.result === false ? 'FAIL' : 'NOT RUN';
+      return `<tr><td>${index + 1}</td><td>${formatValues(inputs, step.inputs)}</td><td>${formatValues(outputs, step.expected)}</td><td>${formatValues(outputs, step.actual)}</td><td class="${step.result === true ? 'passed' : step.result === false ? 'failed' : ''}">${status}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
   }
 
   runTestBench() {
@@ -1970,6 +2012,7 @@ export class ChipLabPanel {
     this.renderTestBenchSteps();
     const summary = `${passed}/${this.testBench.steps.length} tests passed`;
     this.el.querySelector('[data-testbench-result]').textContent = summary;
+    this.renderTestBenchResults();
     this.setStatus(`Test bench "${this.testBench.name}" complete · ${summary}.`);
   }
 
@@ -2315,29 +2358,24 @@ export class ChipLabPanel {
       this.nodes.push(node);
       return node;
     };
-    const wire = (from, output, to, input) => this.wires.push({ from: from.id, output, to: to.id, input });
     if (lesson.id === 'and-gate') {
-      const a = add('INPUT', 'A', 80, 150), b = add('INPUT', 'B', 80, 350);
-      const gate = add('AND', 'A AND B', 400, 240), out = add('OUTPUT', 'Y', 760, 240);
-      wire(a, 0, gate, 0); wire(b, 0, gate, 1); wire(gate, 0, out, 0);
+      add('INPUT', 'A', 80, 150); add('INPUT', 'B', 80, 350);
+      add('AND', 'A AND B', 400, 240); add('OUTPUT', 'Y', 760, 240);
     } else if (lesson.id === 'half-adder') {
-      this.nodes = []; this.wires = []; this.nodeSequence = 0;
-      this.loadPreset('half-adder');
+      add('INPUT', 'A · A0', 140, 260); add('INPUT', 'B · A1', 140, 420);
+      add('XOR', 'XOR · SUM', 500, 260); add('AND', 'AND · CARRY', 500, 440);
+      add('OUTPUT', 'SUM · S', 850, 260); add('OUTPUT', 'CARRY · C', 850, 440);
     } else if (lesson.id === 'bus-mux') {
-      const a = add('BUS_INPUT', 'A[1:0]', 60, 120, 1), b = add('BUS_INPUT', 'B[1:0]', 60, 300, 2);
-      const sel = add('INPUT', 'SEL', 60, 500), mux = add('MUX', '2-bit MUX', 420, 240);
-      const out = add('BUS_OUTPUT', 'Y[1:0]', 800, 240);
-      wire(a, 0, mux, 0); wire(b, 0, mux, 1); wire(sel, 0, mux, 2); wire(mux, 0, out, 0);
+      add('BUS_INPUT', 'A[1:0]', 60, 120, 1); add('BUS_INPUT', 'B[1:0]', 60, 300, 2);
+      add('INPUT', 'SEL', 60, 500); add('MUX', '2-bit MUX', 420, 240);
+      add('BUS_OUTPUT', 'Y[1:0]', 800, 240);
     } else if (lesson.id === 'decoder') {
-      const a0 = add('INPUT', 'A0 · LSB', 70, 180), a1 = add('INPUT', 'A1', 70, 340);
-      const decoder = add('DECODER', '2-to-4 decoder', 400, 180);
-      const outputs = Array.from({ length: 4 }, (_, index) => add('OUTPUT', `Y${index}`, 790, 120 + index * 120));
-      wire(a0, 0, decoder, 0); wire(a1, 0, decoder, 1);
-      outputs.forEach((output, index) => wire(decoder, index, output, 0));
+      add('INPUT', 'A0 · LSB', 70, 180); add('INPUT', 'A1', 70, 340);
+      add('DECODER', '2-to-4 decoder', 400, 180);
+      Array.from({ length: 4 }, (_, index) => add('OUTPUT', `Y${index}`, 790, 120 + index * 120));
     } else {
-      const data = add('BUS_INPUT', 'D[1:0]', 70, 180, 1), clock = add('CLOCK', 'CLK', 70, 380);
-      const register = add('REGISTER', '2-bit register', 420, 240), out = add('BUS_OUTPUT', 'Q[1:0]', 790, 240);
-      wire(data, 0, register, 0); wire(clock, 0, register, 1); wire(register, 0, out, 0);
+      add('BUS_INPUT', 'D[1:0]', 70, 180, 1); add('CLOCK', 'CLK', 70, 380);
+      add('REGISTER', '2-bit register', 420, 240); add('BUS_OUTPUT', 'Q[1:0]', 790, 240);
     }
     this.chipName = `${lesson.title.slice(4)} lesson`;
     this.el.querySelector('[data-chip-name]').value = this.chipName;
@@ -2349,7 +2387,7 @@ export class ChipLabPanel {
     this.render();
     this.runSimulation();
     this.setTab('simulate');
-    this.setStatus(`Lesson circuit loaded · ${lesson.objective}`);
+    this.setStatus(`Challenge started · ${lesson.objective}`);
   }
 
   checkLearningLesson() {

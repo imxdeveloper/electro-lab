@@ -365,6 +365,14 @@ button, input, select {
 .chip-testbench-step.failed { border-color: #8b4a50; background: #301e27; }
 .chip-testbench-step.passed { border-color: #356b50; }
 .chip-testbench-step.failed .chip-testbench-result { color: #ff9c9c; }
+.chip-testbench-results { max-width: 100%; overflow: hidden; }
+.chip-testbench-results-scroll { max-height: 220px; overflow: auto; border: 1px solid #2d3c50; border-radius: 5px; background: #101722; }
+.chip-testbench-results table { width: 100%; border-collapse: collapse; font: 9px var(--font-mono); }
+.chip-testbench-results th,.chip-testbench-results td { padding: 7px; border: 1px solid #2d3c50; text-align: left; vertical-align: top; }
+.chip-testbench-results th { position: sticky; top: 0; background: #202d3d; color: #aabbd0; }
+.chip-testbench-results td { color: #aebdd0; }
+.chip-testbench-results td.passed { color: #63e0a1; font-weight: 700; }
+.chip-testbench-results td.failed { color: #ff9c9c; font-weight: 700; }
 .chip-wave-scroll { max-height: 260px; overflow: auto; border: 1px solid #2d3c50; border-radius: 5px; background: #101722; }
 .chip-wave-svg { display: block; min-width: 100%; }
 .chip-wave-grid { stroke: #273649; stroke-width: 1; }
