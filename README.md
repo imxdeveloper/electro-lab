@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Electro Designer Web 3D Editor 🎨
 
 A browser-based 3D workspace for exploring atoms and molecules, building circuit layouts, and modeling objects. Built with Three.js and WebGL, it includes editable 3D objects, viewport navigation, an animation timeline, and an Atom Lab / Circuit Lab workspace switch.
