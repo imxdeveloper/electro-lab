@@ -118,14 +118,14 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
    - Drag & drop 3D files directly into the viewport or use File → Import.
 =======
 # Functions For Fun
-Use Shift + Q function to find subatomic compounds 
-Use Shift + W function to find conductive elements 
-Use Shift + E function to find electiric field atom
-Use Shift + R function to find more subatomic compounds with another functions
-Use Shift + T function to hide UI sidetab
-Use Shift + O function to find more fun things
-Use Shift + S function to add solar panel
-Use Shift + B function to see what is right hand rule 
+ - Use Shift + Q function to find subatomic compounds 
+ - Use Shift + W function to find conductive elements 
+ - Use Shift + E function to find electiric field atom
+ - Use Shift + R function to find more subatomic compounds with another functions
+ - Use Shift + T function to hide UI sidetab
+ - Use Shift + O function to find more fun things
+ - Use Shift + S function to add solar panel
+ - Use Shift + B function to see what is right hand rule 
 
 You can also add more fun things using more keys with ctrl + any or shift + something you might change anyhow :) Have Fun 
 
