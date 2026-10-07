@@ -118,5 +118,19 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
    - Export models to **GLTF / GLB**, **OBJ**, and **STL**.
    - Drag & drop 3D files directly into the viewport or use File → Import.
 =======
+# Functions For Fun
+Use Shift + Q function to find subatomic compounds 
+Use Shift + W function to find conductive elements 
+Use Shift + E function to find electiric field atom
+Use Shift + R function to find more subatomic compounds with another functions
+Use Shift + T function to hide UI sidetab
+Use Shift + O function to find more fun things
+Use Shift + S function to add solar panel
+Use Shift + B function to see what is right hand rule 
+
+You can also add more fun things using more keys with ctrl + any or shift + something you might change anyhow :) Have Fun 
+
+And maybe some Ctrl + or Shits + Something no one knows about :) Try and find out ^^
+
 # Electro-Lab for EveryOne
 Electro Lab is 3D design tool for matter and logic on Web UI for everyone 
