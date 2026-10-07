@@ -24,6 +24,7 @@ const GATES = {
 };
 const CHIP_LIBRARY_KEY = 'electroDesigner.chipLab.library';
 const CHIP_TESTBENCH_KEY = 'electroDesigner.chipLab.testbenches';
+const CHIP_PROJECTS_KEY = 'electroDesigner.chipLab.projects';
 const TRACE_LIMIT = 48;
 const BUS_WIDTHS = [2, 4, 8];
 const BUS_INPUT_TYPES = new Set(['BUS_INPUT', 'JOINER']);
@@ -69,6 +70,8 @@ export class ChipLabPanel {
     this.dragState = null;
     this.chipName = 'Untitled Logic Chip';
     this.selectedNodeIds = new Set();
+    this.nodeClipboard = null;
+    this.gridSnap = true;
     this.customChips = this.loadCustomChips();
     this.designId = `design-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     this.testBench = { name: 'Untitled test bench', steps: [] };
@@ -76,6 +79,8 @@ export class ChipLabPanel {
     this.clockPeriod = 1000;
     this.clockTimer = null;
     this.clockHigh = false;
+    this.clockEdgeCount = 0;
+    this.clockEdgeLog = [];
     this.editStack = [];
     this.undoStack = [];
     this.redoStack = [];
@@ -94,6 +99,7 @@ export class ChipLabPanel {
         <label class="chip-name-label">DESIGN NAME<input data-chip-name maxlength="48" value="Untitled Logic Chip" aria-label="Chip design name"></label>
         <div class="chip-top-actions">
           <button type="button" data-chip-action="new">New</button>
+          <button type="button" data-chip-action="open-projects">Projects</button>
           <button type="button" data-chip-action="import">Import</button>
           <button type="button" data-chip-action="import-hdl">Import Verilog</button>
           <button type="button" data-chip-action="export-hdl">Export Verilog</button>
@@ -148,6 +154,11 @@ export class ChipLabPanel {
             <h3>Reference designs</h3>
             <button data-chip-preset="half-adder"><i class="chip-gate-icon preset">Σ</i><span><b>Half adder</b><small>Sum and carry outputs</small></span><span class="chip-add-mark">↗</span></button>
             <button data-chip-preset="full-adder"><i class="chip-gate-icon preset">∑</i><span><b>Full adder</b><small>Three-input addition</small></span><span class="chip-add-mark">↗</span></button>
+            <button data-chip-preset="counter"><i class="chip-gate-icon clock">CNT</i><span><b>Enabled counter</b><small>4-bit clocked counter with reset</small></span><span class="chip-add-mark">↗</span></button>
+            <button data-chip-preset="traffic-light"><i class="chip-gate-icon clock">FSM</i><span><b>Traffic light FSM</b><small>One-hot three-state controller</small></span><span class="chip-add-mark">↗</span></button>
+            <button data-chip-preset="accumulator"><i class="chip-gate-icon preset">Σ+</i><span><b>4-bit accumulator</b><small>Clocked running sum</small></span><span class="chip-add-mark">↗</span></button>
+            <button data-chip-preset="ram-demo"><i class="chip-gate-icon clock">RAM</i><span><b>RAM read/write</b><small>4 × 4 synchronous memory</small></span><span class="chip-add-mark">↗</span></button>
+            <button data-chip-action="open-fsm-builder"><i class="chip-gate-icon clock">FSM+</i><span><b>Build a state machine</b><small>Define states and transitions</small></span><span class="chip-add-mark">↗</span></button>
           </div>
           <div class="chip-library-foot"><span class="chip-led"></span> Mixed combinational / clocked logic</div>
         </aside>
@@ -157,6 +168,9 @@ export class ChipLabPanel {
             <div class="chip-canvas-actions">
               <button type="button" data-chip-action="undo" title="Undo (Ctrl+Z)">Undo</button>
               <button type="button" data-chip-action="redo" title="Redo (Ctrl+Y)">Redo</button>
+              <button type="button" data-chip-action="copy" title="Copy selected components (Ctrl+C)">Copy</button>
+              <button type="button" data-chip-action="paste" title="Paste copied components (Ctrl+V)">Paste</button>
+              <button type="button" data-chip-action="grid-snap" class="active" title="Toggle 20-unit grid snapping">Snap: On</button>
               <button type="button" data-chip-action="group" title="Toggle multi-select">Select group</button>
               <button type="button" data-chip-action="back-chip" hidden>Back</button>
               <button type="button" data-chip-action="save-chip-edits" hidden>Save chip</button>
@@ -199,7 +213,7 @@ export class ChipLabPanel {
         <section><header><div><strong>Test benches</strong><span>Build a sequence of input vectors and expected outputs</span></div><button data-chip-action="close-testbench" aria-label="Close test benches">×</button></header>
           <label>TEST BENCH NAME<input data-testbench-name maxlength="48" value="Untitled test bench"></label>
           <div class="chip-testbench-steps" data-testbench-steps></div>
-          <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button></footer>
+          <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button data-chip-action="generate-exhaustive">Generate exhaustive</button><button data-chip-action="generate-random">Add 32 random</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button></footer>
           <p data-testbench-result></p>
         </section>
       </div>
@@ -207,6 +221,23 @@ export class ChipLabPanel {
         <section><header><div><strong>Chip Lab learning path</strong><span>Build and test small circuits, one skill at a time</span></div><button data-chip-action="close-learning" aria-label="Close learning path">×</button></header>
           <div class="chip-learning-layout"><nav data-learning-list></nav><article data-learning-content></article></div>
           <footer><button data-chip-action="load-lesson">Load lesson circuit</button><button class="chip-primary" data-chip-action="check-lesson">Check my circuit</button></footer>
+        </section>
+      </div>
+      <div class="chip-project-modal" data-chip-project-modal hidden>
+        <section><header><div><strong>Local chip projects</strong><span>Save named designs in this browser</span></div><button data-chip-action="close-projects" aria-label="Close projects">×</button></header>
+          <label>PROJECT NAME<input data-project-name maxlength="48" value="Untitled Logic Chip"></label>
+          <div class="chip-project-list" data-project-list></div>
+          <footer><button data-chip-action="save-project" class="chip-primary">Save current design</button><button data-chip-action="close-projects">Close</button></footer>
+        </section>
+      </div>
+      <div class="chip-fsm-modal" data-chip-fsm-modal hidden>
+        <section><header><div><strong>Finite-state machine builder</strong><span>Generates a one-hot DFF implementation</span></div><button data-chip-action="close-fsm-builder" aria-label="Close FSM builder">×</button></header>
+          <label>STATE NAMES · comma or newline separated<input data-fsm-states value="IDLE, ACTIVE, DONE"></label>
+          <label>INITIAL STATE<input data-fsm-initial value="IDLE"></label>
+          <label>TRANSITIONS · one per line: FROM, CONDITION, TO<textarea data-fsm-transitions rows="5">IDLE, START, ACTIVE\nACTIVE, FINISH, DONE\nDONE, *, IDLE</textarea></label>
+          <p>Use * for an unconditional transition, a signal name for active-high, or !signal for active-low. Input pins are created for referenced signals. All transitions advance on the next rising clock edge.</p>
+          <footer><button data-chip-action="close-fsm-builder">Cancel</button><button data-chip-action="create-fsm" class="chip-primary">Create state machine</button></footer>
+          <p data-fsm-error role="status"></p>
         </section>
       </div>
     `;
@@ -226,6 +257,11 @@ export class ChipLabPanel {
 
   bindEvents() {
     this.el.addEventListener('click', (event) => {
+      const waveform = event.target.closest('[data-wave-node-id]');
+      if (waveform) {
+        this.focusWaveSignal(waveform.dataset.waveNodeId);
+        return;
+      }
       const button = event.target.closest('button');
       if (button) {
         if (button.dataset.chipAdd) this.addNode(button.dataset.chipAdd);
@@ -352,6 +388,8 @@ export class ChipLabPanel {
         node,
         x: point.x - node.x,
         y: point.y - node.y,
+        pointerSvgX: point.x,
+        pointerSvgY: point.y,
         pointerX: event.clientX,
         pointerY: event.clientY,
         moved: false,
@@ -378,8 +416,13 @@ export class ChipLabPanel {
       }
       if (!this.dragState.moved) return;
       const point = this.svgPoint(event);
-      this.dragState.node.x = Math.max(20, Math.min(1030, Math.round((point.x - this.dragState.x) / 20) * 20));
-      this.dragState.node.y = Math.max(20, Math.min(630, Math.round((point.y - this.dragState.y) / 20) * 20));
+      const dx = point.x - this.dragState.pointerSvgX;
+      const dy = point.y - this.dragState.pointerSvgY;
+      const original = this.dragState.before.nodes.find((entry) => entry.id === this.dragState.node.id);
+      const snap = (coordinate, maximum) => Math.max(20, Math.min(maximum,
+        this.gridSnap ? Math.round(coordinate / 20) * 20 : Math.round(coordinate)));
+      this.dragState.node.x = snap((original?.x || 0) + dx, 1030);
+      this.dragState.node.y = snap((original?.y || 0) + dy, 630);
       this.renderCanvas();
     });
     canvas.addEventListener('pointerup', () => {
@@ -393,6 +436,8 @@ export class ChipLabPanel {
       if (moved) {
         this.commitHistory(before);
         this.selectNode(node.id, multiSelect);
+      } else if (multiSelect) {
+        this.selectNode(node.id, true);
       }
     });
     window.addEventListener('keydown', (event) => {
@@ -403,6 +448,10 @@ export class ChipLabPanel {
       } else if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'y' || event.key.toLowerCase() === 'z' && event.shiftKey)) {
         event.preventDefault();
         this.redo();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+        if (this.copySelection()) event.preventDefault();
+      } else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') {
+        if (this.pasteClipboard()) event.preventDefault();
       } else if (event.key === 'Delete' || event.key === 'Backspace') {
         if (this.selectedNodeId) this.deleteNode(this.selectedNodeId);
         else if (this.selectedWireIndex !== null) this.deleteWire(this.selectedWireIndex);
@@ -418,6 +467,8 @@ export class ChipLabPanel {
       this.commitHistory();
       this.stopClock();
       this.resetTrace();
+      this.clockEdgeCount = 0;
+      this.clockEdgeLog = [];
       this.editStack = [];
       this.designId = `design-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
       this.testBench = { name: 'Untitled test bench', steps: [] };
@@ -436,6 +487,8 @@ export class ChipLabPanel {
       this.commitHistory();
       this.stopClock();
       this.resetTrace();
+      this.clockEdgeCount = 0;
+      this.clockEdgeLog = [];
       this.nodes = [];
       this.wires = [];
       this.selectedNodeId = null;
@@ -467,6 +520,7 @@ export class ChipLabPanel {
     if (action === 'cancel-subcircuit') this.el.querySelector('[data-chip-subcircuit-modal]').hidden = true;
     if (action === 'save-subcircuit') this.createSubcircuit();
     if (action === 'pulse-clock') this.pulseClock();
+    if (action === 'step-clock') this.stepClock();
     if (action === 'clock-start') this.startClock();
     if (action === 'clock-stop') this.stopClock();
     if (action === 'edit-custom') this.openCustomChipEditor();
@@ -477,6 +531,9 @@ export class ChipLabPanel {
     if (action === 'add-test-step') this.addTestBenchStep();
     if (action === 'delete-test-step') this.deleteTestBenchStep(Number(detail.testStepIndex));
     if (action === 'run-testbench') this.runTestBench();
+    if (action === 'generate-exhaustive') this.generateTestVectors('exhaustive');
+    if (action === 'generate-random') this.generateTestVectors('random', 32);
+    if (action === 'export-vcd') this.exportVcd();
     if (action === 'clear-waveforms') {
       this.resetTrace();
       this.renderSimulation();
@@ -489,12 +546,290 @@ export class ChipLabPanel {
         : 'Circuit checks complete · no issues found.');
     }
     if (action === 'delete-selected-wire' && this.selectedWireIndex !== null) this.deleteWire(this.selectedWireIndex);
+    if (action === 'toggle-wire-probe' && this.selectedWireIndex !== null) {
+      const wire = this.wires[this.selectedWireIndex];
+      if (wire) {
+        this.commitHistory();
+        wire.probe = !wire.probe;
+        this.render();
+        this.setStatus(wire.probe ? 'Signal probe enabled · waveform view is focused on probed wires.' : 'Signal probe removed from this wire.');
+      }
+    }
+    if (action === 'focus-probe') this.setTab('simulate');
+    if (action === 'copy') this.copySelection();
+    if (action === 'paste') this.pasteClipboard();
+    if (action === 'grid-snap') {
+      this.gridSnap = !this.gridSnap;
+      const button = this.el.querySelector('[data-chip-action="grid-snap"]');
+      button.classList.toggle('active', this.gridSnap);
+      button.textContent = `Snap: ${this.gridSnap ? 'On' : 'Off'}`;
+      this.setStatus(`Grid snapping ${this.gridSnap ? 'enabled' : 'disabled'} · component positions ${this.gridSnap ? 'snap to 20-unit intervals' : 'move freely'}.`);
+    }
     if (action === 'open-learning') this.openLearningPath();
     if (action === 'close-learning') this.el.querySelector('[data-chip-learning-modal]').hidden = true;
     if (action === 'select-lesson') this.selectLearningLesson(Number(detail.lessonIndex));
     if (action === 'load-lesson') this.loadLearningLesson();
     if (action === 'check-lesson') this.checkLearningLesson();
     if (action === 'insert-library-chip') this.insertCustomChip(this.el.querySelector('[data-chip-action="insert-library-chip"]')?.dataset.chipId);
+    if (action === 'open-projects') this.openProjects();
+    if (action === 'close-projects') this.el.querySelector('[data-chip-project-modal]').hidden = true;
+    if (action === 'save-project') this.saveProject();
+    if (action === 'load-project') this.loadProject(detail.projectId);
+    if (action === 'delete-project') this.deleteProject(detail.projectId);
+    if (action === 'open-fsm-builder') this.openFsmBuilder();
+    if (action === 'close-fsm-builder') this.el.querySelector('[data-chip-fsm-modal]').hidden = true;
+    if (action === 'create-fsm') this.createStateMachine();
+  }
+
+  openProjects() {
+    this.el.querySelector('[data-project-name]').value = this.chipName;
+    this.el.querySelector('[data-chip-project-modal]').hidden = false;
+    this.renderProjects();
+  }
+
+  readSavedProjects() {
+    try {
+      const projects = JSON.parse(localStorage.getItem(CHIP_PROJECTS_KEY) || '[]');
+      return Array.isArray(projects) ? projects.filter((project) =>
+        project && typeof project.id === 'string' && typeof project.name === 'string' &&
+        project.design?.format === 'electro-lab-chip-design' && [1, 2, 3, 4].includes(project.design.version)
+      ) : [];
+    } catch (error) {
+      console.error('Could not load Chip Lab projects:', error);
+      this.setStatus(`Could not read saved projects: ${error.message}`);
+      return [];
+    }
+  }
+
+  renderProjects() {
+    const list = this.el.querySelector('[data-project-list]');
+    const projects = this.readSavedProjects();
+    list.innerHTML = projects.length ? projects.map((project) =>
+      `<article class="chip-project-item"><div><strong>${escapeHTML(project.name)}</strong><small>${project.design.components.length} components · ${project.design.wires.length} nets · ${escapeHTML(project.updatedAt || '')}</small></div><button data-chip-action="load-project" data-project-id="${escapeHTML(project.id)}">Open</button><button data-chip-action="delete-project" data-project-id="${escapeHTML(project.id)}" aria-label="Delete ${escapeHTML(project.name)}">Delete</button></article>`
+    ).join('') : '<p class="chip-sim-empty">No local projects saved yet.</p>';
+  }
+
+  saveProject() {
+    const name = this.el.querySelector('[data-project-name]').value.trim().slice(0, 48);
+    if (!name) {
+      this.setStatus('Enter a project name before saving.');
+      return false;
+    }
+    const projects = this.readSavedProjects();
+    const existing = projects.find((project) => project.id === this.designId);
+    const project = {
+      id: this.designId,
+      name,
+      updatedAt: new Date().toLocaleString(),
+      design: {
+        format: 'electro-lab-chip-design', version: 4, designId: this.designId, name,
+        components: structuredClone(this.nodes),
+        wires: structuredClone(this.wires),
+        testBench: structuredClone(this.testBench)
+      }
+    };
+    if (existing) projects[projects.indexOf(existing)] = project;
+    else if (projects.length >= 20) {
+      this.setStatus('The local project library holds at most 20 projects. Delete an old project before adding another.');
+      return false;
+    } else projects.unshift(project);
+    try {
+      localStorage.setItem(CHIP_PROJECTS_KEY, JSON.stringify(projects));
+    } catch (error) {
+      this.setStatus(`Could not save project: ${error.message}`);
+      return false;
+    }
+    this.chipName = name;
+    this.el.querySelector('[data-chip-name]').value = name;
+    this.el.querySelector('[data-chip-title]').textContent = name;
+    this.renderProjects();
+    this.setStatus(`Saved project "${name}" in this browser.`);
+    return true;
+  }
+
+  async loadProject(projectId) {
+    const project = this.readSavedProjects().find((entry) => entry.id === projectId);
+    if (!project) {
+      this.setStatus('That local project could not be found.');
+      this.renderProjects();
+      return false;
+    }
+    await this.importDesign({ text: async () => JSON.stringify(project.design) });
+    if (this.el.querySelector('[data-chip-status]').textContent.startsWith('Imported ')) {
+      this.el.querySelector('[data-chip-project-modal]').hidden = true;
+      return true;
+    }
+    return false;
+  }
+
+  deleteProject(projectId) {
+    const projects = this.readSavedProjects();
+    const next = projects.filter((project) => project.id !== projectId);
+    if (next.length === projects.length) {
+      this.setStatus('That local project could not be found.');
+      return false;
+    }
+    try {
+      localStorage.setItem(CHIP_PROJECTS_KEY, JSON.stringify(next));
+      this.renderProjects();
+      this.setStatus('Deleted the saved local project.');
+      return true;
+    } catch (error) {
+      this.setStatus(`Could not delete project: ${error.message}`);
+      return false;
+    }
+  }
+
+  openFsmBuilder() {
+    this.el.querySelector('[data-fsm-error]').textContent = '';
+    this.el.querySelector('[data-chip-fsm-modal]').hidden = false;
+  }
+
+  createStateMachine() {
+    const stateEntries = this.el.querySelector('[data-fsm-states]').value.split(/[,\n]/).map((state) => state.trim()).filter(Boolean);
+    const states = [...new Set(stateEntries)];
+    const initialState = this.el.querySelector('[data-fsm-initial]').value.trim();
+    const rows = this.el.querySelector('[data-fsm-transitions]').value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    const error = this.el.querySelector('[data-fsm-error]');
+    if (states.length < 2 || states.length > 12 || states.length !== stateEntries.length ||
+        states.some((state) => !/^[A-Za-z_]\w*$/.test(state))) {
+      error.textContent = 'Enter 2–12 unique state names using letters, digits, or underscores.';
+      return false;
+    }
+    if (!states.includes(initialState)) {
+      error.textContent = 'Initial state must exactly match one of the listed states.';
+      return false;
+    }
+    const transitions = [];
+    for (const [index, line] of rows.entries()) {
+      const fields = line.split(',').map((part) => part.trim());
+      if (fields.length !== 3 || !states.includes(fields[0]) || !states.includes(fields[2]) ||
+          fields[1] !== '*' && !/^!?[A-Za-z_]\w*$/.test(fields[1])) {
+        error.textContent = `Transition line ${index + 1} must be FROM, CONDITION, TO; use * for unconditional.`;
+        return false;
+      }
+      transitions.push({ from: fields[0], condition: fields[1], to: fields[2] });
+    }
+    if (!transitions.length) {
+      error.textContent = 'Add at least one transition.';
+      return false;
+    }
+    for (const state of states) {
+      const outgoing = transitions.filter((transition) => transition.from === state);
+      const conditions = outgoing.map((transition) => transition.condition);
+      if (conditions.length !== new Set(conditions).size ||
+          conditions.includes('*') && conditions.length > 1) {
+        error.textContent = `State "${state}" has duplicate or ambiguous transition conditions.`;
+        return false;
+      }
+    }
+    for (const transition of transitions) {
+      const condition = transition.condition.replace(/^!/, '');
+      if (transition.condition !== '*' && !/^[A-Za-z_]\w*$/.test(condition)) {
+        error.textContent = `Invalid transition signal "${condition}".`;
+        return false;
+      }
+    }
+    this.buildStateMachine(states, transitions, initialState);
+    this.el.querySelector('[data-chip-fsm-modal]').hidden = true;
+    return true;
+  }
+
+  buildStateMachine(states, transitions, initialState, name = 'State Machine') {
+    this.commitHistory();
+    this.stopClock();
+    this.resetTrace();
+    this.nodes = [];
+    this.wires = [];
+    this.nodeSequence = 0;
+    this.clockEdgeCount = 0;
+    this.clockEdgeLog = [];
+    const add = (type, label, x, y, options = {}) => {
+      const node = {
+        id: `u${++this.nodeSequence}`, type, label: label.slice(0, 32), x, y,
+        value: options.value ?? false, q: options.q ?? false,
+        width: BUS_TYPES.has(type) ? options.width || 4 : undefined
+      };
+      this.nodes.push(node);
+      return node;
+    };
+    const wire = (from, output, to, input) => this.wires.push({ from: from.id, output, to: to.id, input });
+    const clock = add('CLOCK', 'CLK', 50, 120);
+    const stateNodes = new Map();
+    states.forEach((state, index) => {
+      const node = add('DFF', `STATE · ${state}`, 500, 70 + index * 140, { q: state === initialState });
+      stateNodes.set(state, node);
+      wire(clock, 0, node, 1);
+      const output = add('OUTPUT', state, 900, 70 + index * 140);
+      wire(node, 0, output, 0);
+    });
+    const inputNodes = new Map();
+    for (const transition of transitions) {
+      if (transition.condition === '*') continue;
+      const signal = transition.condition.replace(/^!/, '');
+      if (!inputNodes.has(signal)) inputNodes.set(signal, add('INPUT', signal, 50, 300 + inputNodes.size * 100));
+    }
+    const conditionNodes = new Map();
+    for (const transition of transitions) {
+      if (transition.condition === '*' || conditionNodes.has(transition.condition)) continue;
+      const signalName = transition.condition.replace(/^!/, '');
+      let conditionNode = inputNodes.get(signalName);
+      if (transition.condition.startsWith('!')) {
+        const invert = add('NOT', `NOT · ${signalName}`, 250, 50 + conditionNodes.size * 70);
+        wire(conditionNode, 0, invert, 0);
+        conditionNode = invert;
+      }
+      conditionNodes.set(transition.condition, conditionNode);
+    }
+    for (const state of states) {
+      const incoming = transitions.filter((transition) => transition.to === state);
+      const terms = incoming.map((transition, index) => {
+        const source = stateNodes.get(transition.from);
+        if (transition.condition === '*') return { node: source, output: 0 };
+        const condition = conditionNodes.get(transition.condition);
+        const and = add('AND', `${transition.from} → ${state}`, 330, 50 + index * 80);
+        wire(source, 0, and, 0);
+        wire(condition, 0, and, 1);
+        return { node: and, output: 0 };
+      });
+      const outgoing = transitions.filter((transition) => transition.from === state);
+      if (outgoing.length && !outgoing.some((transition) => transition.condition === '*')) {
+        let anyCondition = conditionNodes.get(outgoing[0].condition);
+        for (const transition of outgoing.slice(1)) {
+          const or = add('OR', `ANY · ${state}`, 270, 430 + stateNodes.get(state).y + outgoing.indexOf(transition) * 25);
+          wire(anyCondition, 0, or, 0);
+          wire(conditionNodes.get(transition.condition), 0, or, 1);
+          anyCondition = or;
+        }
+        const noTransition = add('NOT', `HOLD · ${state}`, 350, 430 + stateNodes.get(state).y);
+        wire(anyCondition, 0, noTransition, 0);
+        const hold = add('AND', `HOLD STATE · ${state}`, 420, 430 + stateNodes.get(state).y);
+        wire(stateNodes.get(state), 0, hold, 0);
+        wire(noTransition, 0, hold, 1);
+        terms.push({ node: hold, output: 0 });
+      }
+      if (!terms.length) terms.push({ node: stateNodes.get(state), output: 0 });
+      while (terms.length > 1) {
+        const left = terms.shift(), right = terms.shift();
+        const or = add('OR', `NEXT · ${state}`, 420, 70 + stateNodes.get(state).y + terms.length * 26);
+        wire(left.node, left.output, or, 0);
+        wire(right.node, right.output, or, 1);
+        terms.push({ node: or, output: 0 });
+      }
+      wire(terms[0].node, terms[0].output, stateNodes.get(state), 0);
+    }
+    this.chipName = name;
+    this.el.querySelector('[data-chip-name]').value = name;
+    this.el.querySelector('[data-chip-title]').textContent = name;
+    this.selectedNodeId = null;
+    this.selectedNodeIds.clear();
+    this.selectedWireIndex = null;
+    this.setGroupSelectionMode(false);
+    this.fitCanvas();
+    this.render();
+    this.runSimulation();
+    this.setTab('simulate');
+    this.setStatus(`Created one-hot FSM with ${states.length} states and ${transitions.length} transitions.`);
   }
 
   setTab(tab) {
@@ -632,6 +967,53 @@ export class ChipLabPanel {
     this.el.querySelector('[data-chip-action="group"]')?.classList.toggle('active', active);
   }
 
+  copySelection() {
+    const selectedIds = this.selectedNodeIds.size
+      ? new Set(this.selectedNodeIds)
+      : this.selectedNodeId ? new Set([this.selectedNodeId]) : new Set();
+    const selected = this.nodes.filter((node) => selectedIds.has(node.id));
+    if (!selected.length) {
+      this.setStatus('Select one or more components before copying.');
+      return false;
+    }
+    const copiedIds = new Set(selected.map((node) => node.id));
+    this.nodeClipboard = {
+      nodes: structuredClone(selected),
+      wires: structuredClone(this.wires.filter((wire) => copiedIds.has(wire.from) && copiedIds.has(wire.to)))
+    };
+    this.setStatus(`Copied ${selected.length} component${selected.length === 1 ? '' : 's'} and ${this.nodeClipboard.wires.length} internal connection${this.nodeClipboard.wires.length === 1 ? '' : 's'}.`);
+    return true;
+  }
+
+  pasteClipboard() {
+    if (!this.nodeClipboard?.nodes?.length) {
+      this.setStatus('Copy one or more components before pasting.');
+      return false;
+    }
+    this.commitHistory();
+    const idMap = new Map();
+    const offset = 40;
+    const copies = this.nodeClipboard.nodes.map((source) => {
+      const id = `u${++this.nodeSequence}`;
+      idMap.set(source.id, id);
+      return { ...structuredClone(source), id, label: `${source.label} copy`.slice(0, 32), x: source.x + offset, y: source.y + offset };
+    });
+    const copiedWires = this.nodeClipboard.wires.map((wire) => ({
+      ...structuredClone(wire),
+      from: idMap.get(wire.from),
+      to: idMap.get(wire.to)
+    }));
+    this.nodes.push(...copies);
+    this.wires.push(...copiedWires);
+    this.selectedNodeIds = new Set(copies.map((node) => node.id));
+    this.selectedNodeId = copies.at(-1).id;
+    this.selectedWireIndex = null;
+    this.resetTrace();
+    this.runSimulation();
+    this.setStatus(`Pasted ${copies.length} component${copies.length === 1 ? '' : 's'} with ${copiedWires.length} internal connection${copiedWires.length === 1 ? '' : 's'}.`);
+    return true;
+  }
+
   addNode(type, position) {
     const customChip = this.customChips.find((chip) => chip.id === type);
     const componentType = ['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST'].includes(type) ||
@@ -672,13 +1054,33 @@ export class ChipLabPanel {
     this.nodes = [];
     this.wires = [];
     this.nodeSequence = 0;
+    this.clockEdgeCount = 0;
+    this.clockEdgeLog = [];
     this.selectedNodeIds.clear();
     this.setGroupSelectionMode(false);
-    const add = (type, label, x, y) => {
-      const node = { id: `u${++this.nodeSequence}`, type, label, x, y, value: false };
+    const add = (type, label, x, y, options = {}) => {
+      const node = {
+        id: `u${++this.nodeSequence}`, type, label, x, y,
+        value: options.value ?? false, q: options.q ?? false,
+        width: BUS_TYPES.has(type) ? options.width || 4 : undefined,
+        phase: options.phase || 0,
+        memory: type === 'RAM' ? Array(4).fill(0) : undefined,
+        addressWidth: type === 'RAM' ? 2 : undefined
+      };
       this.nodes.push(node);
       return node;
     };
+    if (preset === 'traffic-light') {
+      this.buildStateMachine(
+        ['RED', 'GREEN', 'YELLOW'],
+        [{ from: 'RED', condition: '*', to: 'GREEN' },
+          { from: 'GREEN', condition: '*', to: 'YELLOW' },
+          { from: 'YELLOW', condition: '*', to: 'RED' }],
+        'RED',
+        'Traffic Light FSM'
+      );
+      return;
+    }
     if (preset === 'half-adder') {
       const a = add('INPUT', 'A · A0', 140, 260);
       const b = add('INPUT', 'B · A1', 140, 420);
@@ -690,7 +1092,7 @@ export class ChipLabPanel {
       this.connect(b, 0, xor, 1); this.connect(b, 0, and, 1);
       this.connect(xor, 0, sum, 0); this.connect(and, 0, carry, 0);
       this.chipName = 'Half Adder';
-    } else {
+    } else if (preset === 'full-adder') {
       const a = add('INPUT', 'A · A0', 80, 170);
       const b = add('INPUT', 'B · A1', 80, 330);
       const cin = add('INPUT', 'CIN · A2', 80, 500);
@@ -708,6 +1110,44 @@ export class ChipLabPanel {
       this.connect(and1, 0, or, 0); this.connect(and2, 0, or, 1);
       this.connect(xor2, 0, sum, 0); this.connect(or, 0, carry, 0);
       this.chipName = 'Full Adder';
+    } else if (preset === 'counter') {
+      const enable = add('INPUT', 'ENABLE', 70, 160, { value: true });
+      const reset = add('INPUT', 'RESET', 70, 330);
+      const clock = add('CLOCK', 'CLK', 70, 500);
+      const counter = add('COUNTER', '4-bit counter', 430, 260, { width: 4, q: 0 });
+      const output = add('BUS_OUTPUT', 'COUNT[3:0]', 830, 260, { width: 4 });
+      this.connect(enable, 0, counter, 0);
+      this.connect(reset, 0, counter, 1);
+      this.connect(clock, 0, counter, 2);
+      this.connect(counter, 0, output, 0);
+      this.chipName = 'Enabled 4-bit Counter';
+    } else if (preset === 'accumulator') {
+      const data = add('BUS_INPUT', 'ADDEND[3:0]', 50, 170, { width: 4, value: 1 });
+      const clock = add('CLOCK', 'CLK', 50, 430);
+      const accumulator = add('REGISTER', 'ACC[3:0]', 450, 280, { width: 4, q: 0 });
+      const adder = add('ADDER', 'ACC + ADDEND', 230, 280, { width: 4 });
+      const carryIn = add('CONST', 'CIN · 0', 230, 500, { value: false });
+      const output = add('BUS_OUTPUT', 'SUM[3:0]', 820, 280, { width: 4 });
+      this.connect(accumulator, 0, adder, 0);
+      this.connect(data, 0, adder, 1);
+      this.connect(carryIn, 0, adder, 2);
+      this.connect(adder, 0, accumulator, 0);
+      this.connect(clock, 0, accumulator, 1);
+      this.connect(accumulator, 0, output, 0);
+      this.chipName = '4-bit Accumulator';
+    } else if (preset === 'ram-demo') {
+      const data = add('BUS_INPUT', 'DATA[3:0]', 40, 100, { width: 4, value: 9 });
+      const address = add('BUS_INPUT', 'ADDR[1:0]', 40, 250, { width: 2, value: 1 });
+      const write = add('INPUT', 'WRITE ENABLE', 40, 400, { value: true });
+      const clock = add('CLOCK', 'CLK', 40, 540);
+      const ram = add('RAM', '4 × 4 RAM', 440, 260, { width: 4, q: 0 });
+      const output = add('BUS_OUTPUT', 'READ DATA[3:0]', 850, 260, { width: 4 });
+      this.connect(data, 0, ram, 0);
+      this.connect(address, 0, ram, 1);
+      this.connect(write, 0, ram, 2);
+      this.connect(clock, 0, ram, 3);
+      this.connect(ram, 0, output, 0);
+      this.chipName = 'Synchronous RAM Demo';
     }
     this.el.querySelector('[data-chip-name]').value = this.chipName;
     this.el.querySelector('[data-chip-title]').textContent = this.chipName;
@@ -1098,6 +1538,10 @@ export class ChipLabPanel {
 
   captureClockEdge() {
     const edgeState = this.evaluate();
+    this.clockEdgeLog ||= [];
+    this.clockEdgeCount ||= 0;
+    const previous = new Map(this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type))
+      .map((node) => [node.id, this.describeSequentialState(node)]));
     let captured = 0;
     const sample = (node, input) => {
       const wire = this.wires.find((entry) => entry.to === node.id && entry.input === input);
@@ -1157,7 +1601,26 @@ export class ChipLabPanel {
         captured += 1;
       }
     }
+    if (captured) {
+      this.clockEdgeCount += 1;
+      const changes = this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type) &&
+        previous.get(node.id) !== this.describeSequentialState(node))
+        .map((node) => `${node.label}: ${previous.get(node.id)} → ${this.describeSequentialState(node)}`);
+      this.clockEdgeLog.unshift({ edge: this.clockEdgeCount, changes });
+      this.clockEdgeLog = this.clockEdgeLog.slice(0, 12);
+    }
     return captured;
+  }
+
+  describeSequentialState(node) {
+    if (node.type === 'RAM') return `Q=${Number(node.q) || 0}, RAM=[${(node.memory || [0, 0, 0, 0]).join(',')}]`;
+    if (node.type === 'REGISTER' || node.type === 'COUNTER') return `Q=${Number(node.q) || 0}`;
+    if (node.type === 'CLOCK_DIVIDER') return `Q=${Number(Boolean(node.q))}, phase=${Number(node.phase) || 0}`;
+    return `Q=${Number(Boolean(node.q))}`;
+  }
+
+  stepClock() {
+    this.pulseClock();
   }
 
   startClock() {
@@ -1378,6 +1841,62 @@ export class ChipLabPanel {
     this.setStatus(`Added test vector ${this.testBench.steps.length} to "${this.testBench.name}".`);
   }
 
+  generateTestVectors(mode, requestedCount = undefined) {
+    const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
+    const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const remaining = 512 - this.testBench.steps.length;
+    if (!inputs.length || !outputs.length) {
+      this.setStatus('Add at least one input and one output pin before generating tests.');
+      return 0;
+    }
+    if (this.nodes.some((node) => SEQUENTIAL_TYPES.has(node.type) || node.type === 'CLOCK')) {
+      this.setStatus('Automatic test generation currently supports combinational designs only; use clocked test vectors for sequential circuits.');
+      return 0;
+    }
+    if (remaining <= 0) {
+      this.setStatus('This test bench already contains the maximum of 512 vectors.');
+      return 0;
+    }
+    const bitCount = inputs.reduce((total, node) =>
+      total + (node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.width || 4 : 1), 0);
+    if (!Number.isInteger(bitCount) || bitCount < 1 || bitCount > 10) {
+      this.setStatus(`Automatic exhaustive tests support 1–10 input bits; this design has ${bitCount}.`);
+      return 0;
+    }
+    const total = mode === 'exhaustive' ? 2 ** bitCount : Math.min(requestedCount || 32, 512);
+    if (mode === 'exhaustive' && total > remaining) {
+      this.setStatus(`Exhaustive testing needs ${total} slots, but only ${remaining} remain. Remove vectors or start a new test bench.`);
+      return 0;
+    }
+    const count = Math.min(total, remaining);
+    const steps = [];
+    for (let vector = 0; vector < count; vector += 1) {
+      let bits = mode === 'exhaustive' ? vector : Math.floor(Math.random() * (2 ** bitCount));
+      const values = new Map();
+      const inputValues = {};
+      for (const node of inputs) {
+        const width = node.type === 'BUS_INPUT' || node.type === 'BUS_CONST' ? node.width || 4 : 1;
+        const value = bits & BUS_MASK(width);
+        bits >>>= width;
+        const inputValue = width === 1 ? Boolean(value) : value;
+        values.set(node.id, inputValue);
+        inputValues[node.id] = inputValue;
+      }
+      const result = this.evaluate(values);
+      const expected = Object.fromEntries(outputs.map((node) => [
+        node.id, result.outputs.has(node.id) ? result.outputs.get(node.id) : node.type === 'BUS_OUTPUT' ? 0 : false
+      ]));
+      steps.push({ inputs: inputValues, expected, clock: false });
+    }
+    this.testBench.name = this.el.querySelector('[data-testbench-name]').value.trim() || 'Untitled test bench';
+    this.testBench.steps.push(...steps);
+    this.persistTestBenches();
+    this.renderTestBenchSteps();
+    const kind = mode === 'exhaustive' ? 'exhaustive' : 'random';
+    this.setStatus(`Added ${steps.length} ${kind} test vector${steps.length === 1 ? '' : 's'} to "${this.testBench.name}".`);
+    return steps.length;
+  }
+
   deleteTestBenchStep(index) {
     if (!Number.isInteger(index) || index < 0 || index >= this.testBench.steps.length) return;
     this.testBench.steps.splice(index, 1);
@@ -1398,11 +1917,11 @@ export class ChipLabPanel {
         const node = this.nodes.find((entry) => entry.id === id);
         return `${escapeHTML(node?.label || id)}=${typeof value === 'number' ? value.toString(2).padStart(node?.width || 4, '0') : Number(value)}`;
       }).join(' · ');
-      return `<article class="chip-testbench-step"><header><b>Step ${index + 1}${step.clock ? ' · CLOCK' : ''}</b><button data-chip-action="delete-test-step" data-test-step-index="${index}" aria-label="Delete test step">×</button></header><p>${vector}</p><div>${outputs.map((node) => {
+      return `<article class="chip-testbench-step ${step.result === false ? 'failed' : step.result === true ? 'passed' : ''}" title="${escapeHTML(step.failure || '')}"><header><b>Step ${index + 1}${step.clock ? ' · CLOCK' : ''}</b><button data-chip-action="delete-test-step" data-test-step-index="${index}" aria-label="Delete test step">×</button></header><p>${vector}</p><div>${outputs.map((node) => {
         const expected = step.expected[node.id];
         const choices = node.type === 'BUS_OUTPUT' ? Array.from({ length: BUS_MASK(node.width || 4) + 1 }, (_, value) => value) : [0, 1];
         return `<label>${escapeHTML(node.label)}<select data-testbench-expected data-step-index="${index}" data-output-id="${escapeHTML(node.id)}">${choices.map((value) => `<option value="${value}" ${Number(expected) === value ? 'selected' : ''}>${node.type === 'BUS_OUTPUT' ? value.toString(2).padStart(node.width || 4, '0') : value}</option>`).join('')}</select></label>`;
-      }).join('')}</div><small class="chip-testbench-result">${step.result === undefined ? 'Not run' : step.result ? 'PASS' : `FAIL · expected ${escapeHTML(step.failure || '')}`}</small></article>`;
+      }).join('')}</div><small class="chip-testbench-result">${step.result === undefined ? 'Not run' : step.result ? 'PASS' : `FAIL · ${escapeHTML(step.failure || 'Check expected output values.')}`}</small></article>`;
     }).join('');
   }
 
@@ -1435,7 +1954,12 @@ export class ChipLabPanel {
       const failures = outputs.filter((node) => !Object.hasOwn(step.expected, node.id) ||
         result.outputs.get(node.id) !== step.expected[node.id] || result.unresolved.has(node.id));
       step.result = failures.length === 0;
-      step.failure = failures.map((node) => `${node.label}: ${result.outputs.get(node.id) ?? 'open'}/${step.expected[node.id] ?? 'missing'}`).join(', ');
+      step.failure = failures.map((node) => {
+        const actual = result.outputs.get(node.id);
+        const expected = step.expected[node.id];
+        return `${node.label} expected ${this.formatTestValue(node, expected)} but got ${this.formatTestValue(node, actual)}${result.unresolved.has(node.id) ? ' (unresolved)' : ''}`;
+      }).join('; ');
+      step.actual = Object.fromEntries(outputs.map((node) => [node.id, result.outputs.get(node.id)]));
       if (step.result) passed += 1;
       this.recordTrace();
     }
@@ -1604,7 +2128,7 @@ export class ChipLabPanel {
           ? `M ${start.x} ${start.y} L ${(start.x + end.x) / 2} ${start.y} L ${(start.x + end.x) / 2} ${end.y} L ${end.x} ${end.y}`
           : `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`;
       const selected = this.selectedWireIndex === index;
-      return `<g class="chip-wire-group ${selected ? 'selected' : ''}"><path class="chip-wire ${high ? 'high' : ''}" d="${path}"/><path class="chip-wire-hit" data-chip-delete-wire="${index}" d="${path}" aria-label="Select wire ${index + 1}; double-click to delete"/><circle class="chip-wire-value ${high ? 'high' : ''}" cx="${(start.x + end.x) / 2}" cy="${(start.y + end.y) / 2}" r="4"/>${wire.label ? `<text class="chip-wire-label" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - 8}">${escapeHTML(wire.label)}</text>` : ''}</g>`;
+      return `<g class="chip-wire-group ${selected ? 'selected' : ''} ${wire.probe ? 'probed' : ''}"><path class="chip-wire ${high ? 'high' : ''}" d="${path}"/><path class="chip-wire-hit" data-chip-delete-wire="${index}" d="${path}" aria-label="Select wire ${index + 1}; double-click to delete"/><circle class="chip-wire-value ${high ? 'high' : ''}" cx="${(start.x + end.x) / 2}" cy="${(start.y + end.y) / 2}" r="4"/>${wire.probe ? `<text class="chip-wire-probe" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - 12}">PROBE</text>` : ''}${wire.label ? `<text class="chip-wire-label" x="${(start.x + end.x) / 2}" y="${(start.y + end.y) / 2 - (wire.probe ? 20 : 8)}">${escapeHTML(wire.label)}</text>` : ''}</g>`;
     }).join('');
     nodesLayer.innerHTML = this.nodes.map((node) => {
       const height = this.nodeHeight(node);
@@ -1895,10 +2419,18 @@ export class ChipLabPanel {
     const node = this.nodes.find((entry) => entry.id === this.selectedNodeId);
     if (this.selectedWireIndex !== null && this.wires[this.selectedWireIndex]) {
       const wire = this.wires[this.selectedWireIndex];
+      const source = this.nodes.find((entry) => entry.id === wire.from);
+      const target = this.nodes.find((entry) => entry.id === wire.to);
+      const value = source ? this.signalValue(this.evaluate().outputs, wire) : undefined;
+      const valueText = typeof value === 'number' ? `${value.toString(2).padStart(this.portWidth(source, 'out', wire.output), '0')} · ${value}`
+        : typeof value === 'boolean' ? value ? 'HIGH · 1' : 'LOW · 0' : 'UNRESOLVED';
       panel.innerHTML = `<div class="chip-inspector-heading"><span>SIGNAL CONNECTION</span><button data-chip-action="delete-selected-wire" title="Delete selected wire">Delete</button></div>
         <label class="chip-form-field">Signal label<input data-wire-label maxlength="32" value="${escapeHTML(wire.label || '')}" placeholder="Optional net label"></label>
         <label class="chip-form-field">Wire routing<select data-wire-route><option value="curve" ${wire.route !== 'straight' && wire.route !== 'orthogonal' ? 'selected' : ''}>Curved</option><option value="orthogonal" ${wire.route === 'orthogonal' ? 'selected' : ''}>Orthogonal</option><option value="straight" ${wire.route === 'straight' ? 'selected' : ''}>Straight</option></select></label>
-        <div class="chip-inspector-tip"><strong>WIRE EDITING</strong><p>Single-click a wire to edit its label or routing. Use Delete here or press the Delete key to remove it.</p></div>`;
+        <div class="chip-spec-list"><div><span>Signal</span><b>${escapeHTML(valueText)}</b></div><div><span>Connection</span><b>${escapeHTML(source?.label || wire.from)} → ${escapeHTML(target?.label || wire.to)}</b></div></div>
+        <button class="chip-wide-action ${wire.probe ? 'is-on' : ''}" data-chip-action="toggle-wire-probe">${wire.probe ? 'Remove signal probe' : 'Probe this signal'}</button>
+        ${wire.probe ? '<button class="chip-wide-action" data-chip-action="focus-probe">View probed waveform</button>' : ''}
+        <div class="chip-inspector-tip"><strong>WIRE EDITING</strong><p>Single-click a wire to edit its label or routing. Probed wires appear in the focused timing waveform view. Use Delete here or press Delete to remove it.</p></div>`;
       return;
     }
 
@@ -1973,7 +2505,7 @@ export class ChipLabPanel {
       <div class="chip-sim-section"><h3>INPUT VECTORS <span>${inputs.length} PINS</span></h3>${inputs.length ? inputs.map((node) => node.type === 'INPUT' || node.type === 'CONST'
         ? `<button class="chip-sim-pin" data-chip-toggle="${node.id}"><span><i class="${node.value ? 'high' : 'low'}"></i>${escapeHTML(node.label)}</span><b>${node.value ? '1 · HIGH' : '0 · LOW'}</b></button>`
         : `<label class="chip-sim-pin"><span>${escapeHTML(node.label)} · ${node.width || 4} bits</span><input data-bus-value data-node-id="${node.id}" type="number" min="0" max="${BUS_MASK(node.width || 4)}" value="${Number(node.value) || 0}"></label>`).join('') : '<p class="chip-sim-empty">Add input pins to drive the design.</p>'}</div>
-      ${this.nodes.some((node) => node.type === 'CLOCK' || SEQUENTIAL_TYPES.has(node.type)) ? `<div class="chip-sim-section"><h3>SEQUENTIAL CONTROL <span>${this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type)).length} COMPONENTS</span></h3><button class="chip-run-button" data-chip-action="pulse-clock">◷ &nbsp; Pulse rising clock edge</button><p class="chip-sim-note">Sequential components update on a rising edge from a connected clock source.</p></div>` : ''}
+      ${this.nodes.some((node) => node.type === 'CLOCK' || SEQUENTIAL_TYPES.has(node.type)) ? `<div class="chip-sim-section"><h3>SEQUENTIAL CONTROL <span>${this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type)).length} COMPONENTS</span></h3><button class="chip-run-button" data-chip-action="step-clock">Step one rising edge</button><button class="chip-truth-button" data-chip-action="${this.clockTimer ? 'clock-stop' : 'clock-start'}">${this.clockTimer ? 'Pause automatic clock' : 'Start automatic clock'}</button><p class="chip-sim-note">Step applies one edge, then leaves the clock LOW. The state log records changed sequential values.</p></div>` : ''}
       ${this.nodes.some((node) => node.type === 'CLOCK') && this.nodes.some((node) => SEQUENTIAL_TYPES.has(node.type)) ? `<div class="chip-sim-section"><h3>AUTOMATIC CLOCK</h3><label class="chip-sim-period">Period<select data-chip-clock-period><option value="200" ${this.clockPeriod === 200 ? 'selected' : ''}>200 ms</option><option value="500" ${this.clockPeriod === 500 ? 'selected' : ''}>500 ms</option><option value="1000" ${this.clockPeriod === 1000 ? 'selected' : ''}>1 s</option><option value="2000" ${this.clockPeriod === 2000 ? 'selected' : ''}>2 s</option></select></label><button class="chip-run-button" data-chip-action="${this.clockTimer ? 'clock-stop' : 'clock-start'}">${this.clockTimer ? '■ Stop automatic clock' : '▶ Start automatic clock'}</button></div>` : ''}
       <div class="chip-sim-section"><h3>OUTPUT MONITORS <span>${outputs.length} PINS</span></h3>${outputs.length ? outputs.map((node) => {
         const value = result.outputs.get(node.id);
@@ -1988,14 +2520,126 @@ export class ChipLabPanel {
       <button class="chip-truth-button" data-chip-action="open-testbench">Test benches · ${this.testBench.steps.length} vectors</button>
       <button class="chip-truth-button" data-chip-action="open-learning">Learning path · ${this.learningProgress.length} completed</button>
       <section class="chip-diagnostics-section"><header><strong>CIRCUIT CHECKS</strong><button data-chip-action="diagnose">Run checks</button></header>${this.renderDiagnostics()}</section>
-      <section class="chip-waveform-section"><header><strong>TIMING WAVEFORMS</strong><button data-chip-action="clear-waveforms">Clear</button></header>${this.renderWaveforms()}</section>
+      ${this.nodes.some((node) => SEQUENTIAL_TYPES.has(node.type)) ? `<section class="chip-clock-debugger"><header><strong>CLOCK EDGE DEBUGGER</strong><span>${this.clockEdgeCount} edges</span></header>${this.renderClockDebugger()}</section>` : ''}
+      <section class="chip-waveform-section"><header><strong>TIMING WAVEFORMS</strong><span><button data-chip-action="export-vcd" ${this.trace.length ? '' : 'disabled'}>Export VCD</button><button data-chip-action="clear-waveforms">Clear</button></span></header>${this.renderWaveforms()}</section>
       <p class="chip-sim-note">Combinational propagation is live; D flip-flops update on manual pulses or while the automatic clock is running.</p>`;
+  }
+
+  renderClockDebugger() {
+    const sequential = this.nodes.filter((node) => SEQUENTIAL_TYPES.has(node.type));
+    const states = sequential.map((node) =>
+      `<div class="chip-clock-state"><span>${escapeHTML(node.label)} · ${node.type}</span><b>${escapeHTML(this.describeSequentialState(node))}</b></div>`
+    ).join('');
+    const edges = this.clockEdgeLog.length
+      ? this.clockEdgeLog.map((entry) => `<article><b>Edge ${entry.edge}</b><p>${escapeHTML(entry.changes.join(' · ') || 'Clock edge captured; state held.')}</p></article>`).join('')
+      : '<p class="chip-sim-empty">Step the clock to record state changes.</p>';
+    return `<div class="chip-clock-state-list">${states}</div><div class="chip-clock-edge-list">${edges}</div>`;
+  }
+
+  formatTestValue(node, value) {
+    if (value === undefined || value === null) return 'open';
+    if (node.type === 'BUS_OUTPUT' && typeof value === 'number') {
+      return `${value.toString(2).padStart(node.width || 4, '0')} (${value})`;
+    }
+    return typeof value === 'boolean' ? value ? 'HIGH (1)' : 'LOW (0)' : String(value);
+  }
+
+  buildVcd() {
+    if (!this.trace.length) throw new Error('Capture at least one signal transition before exporting a VCD trace.');
+    const signals = [];
+    for (const node of this.nodes) {
+      if (node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT') {
+        signals.push({ node, output: null, width: node.type === 'BUS_OUTPUT' ? node.width || 4 : 1 });
+        continue;
+      }
+      for (let output = 0; output < this.outputCount(node); output += 1) {
+        signals.push({
+          node,
+          output,
+          width: this.portSignalKind(node, 'out', output) === 'bus' ? node.width || 4 : 1
+        });
+      }
+    }
+    if (!signals.length) throw new Error('This design has no signal outputs to export.');
+    const safeName = (name) => String(name || 'signal').replace(/[^A-Za-z0-9_$]/g, '_').replace(/^[^A-Za-z_$]/, '_$&');
+    const descriptors = signals.map((signal, index) => ({
+      ...signal,
+      id: `s${index}`,
+      name: safeName(signal.output === null
+        ? signal.node.label
+        : this.outputCount(signal.node) > 1 ? `${signal.node.label}_${signal.output + 1}` : signal.node.label)
+    }));
+    const lines = [
+      '$date generated by Electro Lab $end',
+      '$version Electro Lab Chip Lab $end',
+      '$timescale 1ms $end',
+      '$scope module ChipLab $end',
+      ...descriptors.map(({ id, name, width }) => `$var wire ${width} ${id} ${name} $end`),
+      '$upscope $end',
+      '$enddefinitions $end'
+    ];
+    const valueFor = (sample, descriptor) => {
+      const value = new Map(sample.outputs).get(descriptor.node.id);
+      return descriptor.output === null || !Array.isArray(value) ? value : value[descriptor.output];
+    };
+    this.trace.forEach((sample, time) => {
+      lines.push(`#${time}`);
+      for (const descriptor of descriptors) {
+        const value = valueFor(sample, descriptor);
+        if (descriptor.width === 1) {
+          lines.push(`${value === true || typeof value === 'number' && value !== 0 ? '1' : value === false || typeof value === 'number' ? '0' : 'x'}${descriptor.id}`);
+        } else {
+          const binary = typeof value === 'number'
+            ? (value & BUS_MASK(descriptor.width)).toString(2).padStart(descriptor.width, '0')
+            : 'x'.repeat(descriptor.width);
+          lines.push(`b${binary} ${descriptor.id}`);
+        }
+      }
+    });
+    return `${lines.join('\n')}\n`;
+  }
+
+  exportVcd() {
+    try {
+      const content = this.buildVcd();
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${this.chipName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'logic-chip'}.vcd`;
+      link.click();
+      URL.revokeObjectURL(url);
+      this.setStatus(`Exported ${this.trace.length} captured simulation samples as VCD.`);
+    } catch (error) {
+      this.setStatus(`Could not export VCD: ${error.message}`);
+    }
   }
 
   renderWaveforms() {
     if (!this.trace.length) return '<p class="chip-sim-empty">Run clock steps or change inputs to capture signal history.</p>';
     const rows = [];
-    for (const node of this.nodes) {
+    const probedWires = this.wires.filter((wire) => wire.probe);
+    if (probedWires.length) {
+      for (const wire of probedWires) {
+        const node = this.nodes.find((entry) => entry.id === wire.from);
+        const target = this.nodes.find((entry) => entry.id === wire.to);
+        if (!node || !target) continue;
+        const width = this.portWidth(node, 'out', wire.output);
+        rows.push({
+          node,
+          output: wire.output,
+          bit: 0,
+          width,
+          label: `${wire.label || `${node.label} → ${target.label}`}${width > 1 ? `[${width - 1}:0]` : ''}`
+        });
+        if (width > 1) {
+          for (let bit = 1; bit < width; bit += 1) rows.push({
+            node, output: wire.output, bit, width,
+            label: `${wire.label || `${node.label} → ${target.label}`}[${bit}]`
+          });
+        }
+      }
+    } else for (const node of this.nodes) {
       if (node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT') {
         const width = node.type === 'BUS_OUTPUT' ? node.width || 4 : 1;
         for (let bit = 0; bit < width; bit += 1) rows.push({ node, output: 0, bit, width, label: `${node.label}${width > 1 ? `[${bit}]` : ''}` });
@@ -2025,9 +2669,21 @@ export class ChipLabPanel {
         return { x: labelWidth + index * stepWidth + stepWidth / 2, y: yTop + (bitValue === true ? 5 : bitValue === false ? 21 : 13) };
       });
       const path = points.map((point, index) => `${index ? `H ${point.x} V ${point.y}` : `M ${point.x} ${point.y}`}`).join(' ');
-      return `<text x="4" y="${yTop + 14}" class="chip-wave-label">${escapeHTML(row.label)}</text><path d="${path}" class="chip-wave-path"/>`;
+      return `<g class="chip-wave-row" data-wave-node-id="${escapeHTML(row.node.id)}" tabindex="0" role="button" aria-label="Select ${escapeHTML(row.label)} on the schematic"><rect x="0" y="${yTop}" width="${labelWidth + graphWidth}" height="${rowHeight}" class="chip-wave-hit"/><text x="4" y="${yTop + 14}" class="chip-wave-label">${escapeHTML(row.label)}</text><path d="${path}" class="chip-wave-path"/></g>`;
     }).join('');
-    return `<div class="chip-wave-scroll"><svg class="chip-wave-svg" width="${labelWidth + graphWidth}" height="${graphHeight + 4}" viewBox="0 0 ${labelWidth + graphWidth} ${graphHeight + 4}" role="img" aria-label="Signal timing waveforms">${grid}${signals}</svg></div><small>${this.trace.length} captured transitions · most recent ${TRACE_LIMIT} retained</small>`;
+    return `<div class="chip-wave-scroll"><svg class="chip-wave-svg" width="${labelWidth + graphWidth}" height="${graphHeight + 4}" viewBox="0 0 ${labelWidth + graphWidth} ${graphHeight + 4}" role="img" aria-label="${probedWires.length ? 'Probed signal timing waveforms' : 'Signal timing waveforms'}">${grid}${signals}</svg></div><small>${probedWires.length ? `${probedWires.length} probed connection${probedWires.length === 1 ? '' : 's'} · ` : ''}${this.trace.length} captured transitions · most recent ${TRACE_LIMIT} retained</small>`;
+  }
+
+  focusWaveSignal(nodeId) {
+    const node = this.nodes.find((entry) => entry.id === nodeId);
+    if (!node) return;
+    this.selectedNodeId = node.id;
+    this.selectedNodeIds = new Set([node.id]);
+    this.selectedWireIndex = null;
+    this.renderCanvas();
+    this.renderInspector();
+    this.setTab('inspect');
+    this.setStatus(`Selected "${node.label}" from its waveform.`);
   }
 
   render() {
@@ -2493,13 +3149,15 @@ export class ChipLabPanel {
             !Number.isInteger(wire.input) || wire.input < 0 || wire.input >= inputCount ||
             !this.portsCompatible(source, wire.output, target, wire.input) ||
             wire.label !== undefined && typeof wire.label !== 'string' ||
-            wire.route !== undefined && !['curve', 'orthogonal', 'straight'].includes(wire.route)) {
+            wire.route !== undefined && !['curve', 'orthogonal', 'straight'].includes(wire.route) ||
+            wire.probe !== undefined && typeof wire.probe !== 'boolean') {
           throw new Error('The design contains an invalid signal connection.');
         }
         return {
           from: source.id, output: wire.output, to: target.id, input: wire.input,
           label: typeof wire.label === 'string' ? wire.label.slice(0, 32) : undefined,
-          route: wire.route
+          route: wire.route,
+          probe: wire.probe === true
         };
       });
       if (new Set(wires.map((wire) => `${wire.to}:${wire.input}`)).size !== wires.length) {
@@ -2520,6 +3178,8 @@ export class ChipLabPanel {
       this.wires = wires;
       this.stopClock();
       this.resetTrace();
+      this.clockEdgeCount = 0;
+      this.clockEdgeLog = [];
       this.editStack = [];
       this.updateEditControls();
       this.nodeSequence = components.reduce((max, node) => Math.max(max, Number(node.id.slice(1)) || 0), 0);

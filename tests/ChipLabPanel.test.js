@@ -295,7 +295,7 @@ test('design import retains wire labels and routing metadata', async () => {
         { id: 'output', type: 'OUTPUT', label: 'Y', x: 200, y: 0 }
       ],
       wires: [
-        { from: 'input', output: 0, to: 'not', input: 0, label: 'signal_a', route: 'orthogonal' },
+        { from: 'input', output: 0, to: 'not', input: 0, label: 'signal_a', route: 'orthogonal', probe: true },
         { from: 'not', output: 0, to: 'output', input: 0 }
       ],
       testBench: { name: 'Empty', steps: [] }
@@ -305,5 +305,221 @@ test('design import retains wire labels and routing metadata', async () => {
   assert.equal(panel.status, 'Imported 3 components and 2 signal nets.');
   assert.equal(panel.wires[0].label, 'signal_a');
   assert.equal(panel.wires[0].route, 'orthogonal');
+  assert.equal(panel.wires[0].probe, true);
   assert.equal(panel.wires[1].route, undefined);
+});
+
+test('exhaustive test generation covers each scalar input combination', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'A', value: false },
+    { id: 'b', type: 'INPUT', label: 'B', value: false },
+    { id: 'xor', type: 'XOR', label: 'XOR' },
+    { id: 'out', type: 'OUTPUT', label: 'Y' }
+  ], [
+    { from: 'a', output: 0, to: 'xor', input: 0 },
+    { from: 'b', output: 0, to: 'xor', input: 1 },
+    { from: 'xor', output: 0, to: 'out', input: 0 }
+  ]);
+  panel.testBench = { name: 'XOR checks', steps: [] };
+  panel.el = { querySelector: () => ({ value: 'XOR checks' }) };
+  panel.persistTestBenches = () => {};
+  panel.renderTestBenchSteps = () => {};
+  panel.setStatus = (message) => { panel.status = message; };
+
+  assert.equal(panel.generateTestVectors('exhaustive'), 4);
+  assert.deepEqual(panel.testBench.steps.map((step) => [step.inputs.a, step.inputs.b, step.expected.out]), [
+    [false, false, false],
+    [true, false, true],
+    [false, true, true],
+    [true, true, false]
+  ]);
+  assert.match(panel.status, /Added 4 exhaustive test vectors/);
+});
+
+test('exhaustive generation refuses vectors that exceed the supported bit limit', () => {
+  const nodes = Array.from({ length: 11 }, (_, index) => ({
+    id: `i${index}`, type: 'INPUT', label: `I${index}`, value: false
+  }));
+  nodes.push({ id: 'out', type: 'OUTPUT', label: 'Y' });
+  const panel = createPanel(nodes, []);
+  panel.testBench = { name: 'Large', steps: [] };
+  panel.el = { querySelector: () => ({ value: 'Large' }) };
+  panel.setStatus = (message) => { panel.status = message; };
+
+  assert.equal(panel.generateTestVectors('exhaustive'), 0);
+  assert.match(panel.status, /1–10 input bits/);
+});
+
+test('VCD export encodes scalar and bus waveforms with sample timestamps', () => {
+  const panel = createPanel([
+    { id: 'bus', type: 'BUS_INPUT', label: 'Data bus', width: 4 },
+    { id: 'invert', type: 'BUS_NOT', label: 'Invert bus', width: 4 },
+    { id: 'out', type: 'BUS_OUTPUT', label: 'Result bus', width: 4 }
+  ], []);
+  panel.trace = [
+    { outputs: [['bus', 3], ['invert', 12], ['out', 12]] },
+    { outputs: [['bus', 8], ['invert', 7], ['out', 7]] }
+  ];
+
+  const vcd = panel.buildVcd();
+  assert.match(vcd, /\$timescale 1ms \$end/);
+  assert.match(vcd, /\$var wire 4 s0 Data_bus \$end/);
+  assert.match(vcd, /#0[\s\S]*b0011 s0[\s\S]*b1100 s1[\s\S]*#1[\s\S]*b1000 s0/);
+});
+
+test('VCD export gives an actionable message when no trace is captured', () => {
+  const panel = createPanel([], []);
+  panel.trace = [];
+  assert.throws(() => panel.buildVcd(), /Capture at least one signal transition/);
+});
+
+test('copy and paste duplicate selected components and only their internal wires', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'A', x: 20, y: 40 },
+    { id: 'not', type: 'NOT', label: 'Inverter', x: 140, y: 60 },
+    { id: 'out', type: 'OUTPUT', label: 'Y', x: 280, y: 60 }
+  ], [
+    { from: 'a', output: 0, to: 'not', input: 0 },
+    { from: 'not', output: 0, to: 'out', input: 0 }
+  ]);
+  panel.selectedNodeId = 'not';
+  panel.selectedNodeIds = new Set(['a', 'not']);
+  panel.nodeSequence = 3;
+  panel.commitHistory = () => {};
+  panel.resetTrace = () => {};
+  panel.render = () => {};
+  panel.runSimulation = () => {};
+  panel.setStatus = (message) => { panel.status = message; };
+
+  assert.equal(panel.copySelection(), true);
+  assert.equal(panel.nodeClipboard.wires.length, 1);
+  assert.equal(panel.pasteClipboard(), true);
+  assert.deepEqual(panel.nodes.slice(3).map(({ id, x, y }) => ({ id, x, y })), [
+    { id: 'u4', x: 60, y: 80 },
+    { id: 'u5', x: 180, y: 100 }
+  ]);
+  assert.deepEqual(panel.wires[2], { from: 'u4', output: 0, to: 'u5', input: 0 });
+  assert.deepEqual([...panel.selectedNodeIds], ['u4', 'u5']);
+});
+
+test('probed wires focus the waveform list to probed signals only', () => {
+  const panel = createPanel([
+    { id: 'a', type: 'INPUT', label: 'A' },
+    { id: 'not', type: 'NOT', label: 'Inverter' },
+    { id: 'out', type: 'OUTPUT', label: 'Y' }
+  ], [
+    { from: 'a', output: 0, to: 'not', input: 0 },
+    { from: 'not', output: 0, to: 'out', input: 0, label: 'result', probe: true }
+  ]);
+  panel.trace = [{ outputs: [['a', true], ['not', false], ['out', false]] }];
+
+  const waveforms = panel.renderWaveforms();
+  assert.match(waveforms, /result/);
+  assert.doesNotMatch(waveforms, />A</);
+  assert.match(waveforms, /1 probed connection/);
+});
+
+test('unprobed waveform rendering includes output signals even when inputs come first', () => {
+  const panel = createPanel([
+    { id: 'clock', type: 'CLOCK', label: 'CLK' },
+    { id: 'state', type: 'DFF', label: 'STATE', q: false },
+    { id: 'out', type: 'OUTPUT', label: 'Y' }
+  ], []);
+  panel.trace = [{ outputs: [['clock', false], ['state', false], ['out', false]] }];
+
+  const waveforms = panel.renderWaveforms();
+  assert.match(waveforms, /CLK/);
+  assert.match(waveforms, /STATE/);
+  assert.match(waveforms, />Y</);
+  assert.match(waveforms, /<svg/);
+});
+
+test('one-hot state machine advances on its guard and holds when no transition is active', () => {
+  const panel = createPanel([], []);
+  const controls = {
+    '[data-chip-name]': { value: '' },
+    '[data-chip-title]': { textContent: '' }
+  };
+  panel.el = { querySelector: (selector) => controls[selector] };
+  panel.nodeSequence = 0;
+  panel.chipName = 'FSM';
+  panel.selectedNodeIds = new Set();
+  panel.selectedNodeId = null;
+  panel.selectedWireIndex = null;
+  panel.clockEdgeLog = [];
+  panel.clockEdgeCount = 0;
+  panel.commitHistory = () => {};
+  panel.stopClock = () => {};
+  panel.resetTrace = () => {};
+  panel.setGroupSelectionMode = () => {};
+  panel.fitCanvas = () => {};
+  panel.render = () => {};
+  panel.runSimulation = () => {};
+  panel.setTab = () => {};
+  panel.setStatus = () => {};
+  panel.buildStateMachine(
+    ['IDLE', 'RUN'],
+    [
+      { from: 'IDLE', condition: 'GO', to: 'RUN' },
+      { from: 'RUN', condition: '!GO', to: 'IDLE' }
+    ],
+    'IDLE'
+  );
+  const idle = panel.nodes.find((node) => node.label === 'IDLE');
+  const running = panel.nodes.find((node) => node.label === 'RUN');
+  const go = panel.nodes.find((node) => node.label === 'GO');
+  const clock = panel.nodes.find((node) => node.type === 'CLOCK');
+
+  assert.equal(panel.evaluate().outputs.get(idle.id), true);
+  assert.equal(panel.evaluate().outputs.get(running.id), false);
+  go.value = true;
+  clock.value = true;
+  panel.captureClockEdge();
+  assert.equal(panel.evaluate().outputs.get(idle.id), false);
+  assert.equal(panel.evaluate().outputs.get(running.id), true);
+  assert.equal(panel.clockEdgeCount, 1);
+  go.value = true;
+  clock.value = false;
+  panel.captureClockEdge();
+  assert.equal(panel.evaluate().outputs.get(running.id), true);
+  go.value = false;
+  clock.value = true;
+  panel.captureClockEdge();
+  assert.equal(panel.evaluate().outputs.get(idle.id), true);
+});
+
+test('saved projects include the current schematic and test bench', () => {
+  const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, String(value))
+  } });
+  try {
+    const panel = createPanel(
+      [{ id: 'input', type: 'INPUT', label: 'A', x: 20, y: 30 }],
+      []
+    );
+    const controls = {
+      '[data-project-name]': { value: 'Stored example' },
+      '[data-chip-name]': { value: '' },
+      '[data-chip-title]': { textContent: '' }
+    };
+    panel.el = { querySelector: (selector) => controls[selector] };
+    panel.chipName = 'Untitled';
+    panel.designId = 'project-test';
+    panel.testBench = { name: 'Basic tests', steps: [{ inputs: { input: true }, expected: {}, clock: false }] };
+    panel.renderProjects = () => {};
+    panel.setStatus = (message) => { panel.status = message; };
+
+    assert.equal(panel.saveProject(), true);
+    const projects = JSON.parse(values.get('electroDesigner.chipLab.projects'));
+    assert.equal(projects.length, 1);
+    assert.equal(projects[0].name, 'Stored example');
+    assert.equal(projects[0].design.components[0].id, 'input');
+    assert.equal(projects[0].design.testBench.steps.length, 1);
+  } finally {
+    if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage);
+    else delete globalThis.localStorage;
+  }
 });

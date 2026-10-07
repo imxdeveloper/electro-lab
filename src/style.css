@@ -223,10 +223,12 @@ button, input, select {
 .chip-value-text { fill: #dce5ef; text-anchor: start; }
 .chip-wire { fill: none; stroke: #65758a; stroke-width: 2; pointer-events: none; }
 .chip-wire.high { stroke: #3ed48c; stroke-width: 2.5; filter: drop-shadow(0 0 3px #3ed48c88); }
+.chip-wire-group.probed .chip-wire { stroke: #d4a8ff; stroke-width: 3; filter: drop-shadow(0 0 3px #a879e988); }
 .chip-wire-hit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
 .chip-wire-hit:hover { stroke: #ef727755; }
 .chip-wire-value { fill: #65758a; pointer-events: none; }
 .chip-wire-value.high { fill: #3ed48c; }
+.chip-wire-probe { fill: #dfc7ff; font: 700 7px var(--font-mono); text-anchor: middle; paint-order: stroke; stroke: #101722; stroke-width: 3px; pointer-events: none; }
 .chip-empty-state { position: absolute; top: 50%; left: 50%; display: grid; justify-items: center; gap: 10px; width: min(420px, calc(100% - 40px)); transform: translate(-50%,-50%); color: #d8e2ef; text-align: center; pointer-events: none; }
 .chip-empty-state[hidden] { display: none; }
 .chip-empty-icon { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid #3b5271; border-radius: 12px; background: #1b2b40; color: #8bb8f2; font-size: 22px; }
@@ -325,13 +327,51 @@ button, input, select {
 .chip-testbench-modal footer .chip-testbench-clock { display: flex; align-items: center; gap: 5px; margin-right: auto; color: #9baabd; font-size: 10px; }
 .chip-testbench-modal footer .chip-testbench-clock input { accent-color: #69a5ff; }
 .chip-testbench-modal [data-testbench-result] { min-height: 15px; margin-top: 9px; color: #68d99d; font: 10px var(--font-mono); }
+.chip-project-modal,.chip-fsm-modal { position: fixed; z-index: 2147483647; inset: 0; display: grid; place-items: center; background: #060a10bb; }
+.chip-project-modal[hidden],.chip-fsm-modal[hidden] { display: none; }
+.chip-project-modal > section,.chip-fsm-modal > section { display: flex; width: min(680px, calc(100vw - 32px)); max-height: min(84vh, 760px); flex-direction: column; gap: 11px; padding: 16px; border: 1px solid #3a4d65; border-radius: 9px; background: #151e2a; box-shadow: 0 20px 60px #0009; }
+.chip-project-modal header,.chip-fsm-modal header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.chip-project-modal header > div,.chip-fsm-modal header > div { display: grid; gap: 5px; }
+.chip-project-modal header strong,.chip-fsm-modal header strong { font-size: 14px; }
+.chip-project-modal header span,.chip-fsm-modal header span { color: #8fa1b8; font-size: 10px; }
+.chip-project-modal header button,.chip-fsm-modal header button { width: 27px; height: 27px; border-radius: 5px; background: #2a384a; color: #dce5ef; cursor: pointer; font-size: 17px; }
+.chip-project-modal label,.chip-fsm-modal label { display: grid; gap: 6px; color: #8494a9; font: 600 9px var(--font-mono); letter-spacing: .08em; }
+.chip-project-modal input,.chip-fsm-modal input,.chip-fsm-modal textarea { width: 100%; padding: 8px; border: 1px solid #35445a; border-radius: 5px; background: #101722; color: #e0e8f1; font: 11px var(--font-ui); letter-spacing: 0; user-select: text; }
+.chip-fsm-modal textarea { resize: vertical; font-family: var(--font-mono); line-height: 1.6; }
+.chip-project-list { display: grid; gap: 6px; min-height: 70px; max-height: 46vh; overflow: auto; }
+.chip-project-item { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px solid #2d3c50; border-radius: 6px; background: #192331; }
+.chip-project-item > div { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.chip-project-item strong { overflow: hidden; color: #dce5ef; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.chip-project-item small { color: #8494a9; font-size: 9px; }
+.chip-project-item button,.chip-project-modal footer button,.chip-fsm-modal footer button { padding: 7px 10px; border: 1px solid #35445a; border-radius: 5px; background: #202b3a; color: #c7d3e3; cursor: pointer; }
+.chip-project-modal footer,.chip-fsm-modal footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 10px; border-top: 1px solid #2d3c50; }
+.chip-fsm-modal > section > p { color: #9baabd; font-size: 10px; line-height: 1.6; }
+.chip-fsm-modal [data-fsm-error] { min-height: 14px; color: #ff9c9c; font: 10px var(--font-mono); }
+.chip-clock-debugger { margin-top: 14px; padding-top: 10px; border-top: 1px solid #2d3c50; }
+.chip-clock-debugger > header { display: flex; justify-content: space-between; color: #8b9aae; font: 600 9px var(--font-mono); }
+.chip-clock-debugger > header span { color: #7fa9de; }
+.chip-clock-state-list,.chip-clock-edge-list { display: grid; gap: 5px; margin-top: 7px; }
+.chip-clock-state { display: grid; gap: 3px; padding: 6px; border: 1px solid #2d3c50; border-radius: 4px; background: #141e2b; }
+.chip-clock-state span,.chip-clock-edge-list article b { color: #9aabc0; font-size: 9px; }
+.chip-clock-state b { color: #d8e3f0; font: 9px var(--font-mono); }
+.chip-clock-edge-list { max-height: 120px; overflow: auto; }
+.chip-clock-edge-list article { padding: 6px; border-left: 2px solid #5784ba; background: #192331; }
+.chip-clock-edge-list article p { margin-top: 3px; color: #9aabc0; font: 9px var(--font-mono); line-height: 1.5; }
 .chip-waveform-section { margin-top: 16px; padding-top: 10px; border-top: 1px solid #2d3c50; }
 .chip-waveform-section > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #8b9aae; font: 600 9px var(--font-mono); letter-spacing: .07em; }
+.chip-waveform-section > header span { display: flex; gap: 5px; }
 .chip-waveform-section > header button { padding: 3px 6px; border: 1px solid #35445a; border-radius: 4px; background: #202b3a; color: #aebdd0; cursor: pointer; font: 9px var(--font-ui); letter-spacing: 0; }
+.chip-waveform-section > header button:disabled { opacity: .45; cursor: not-allowed; }
+.chip-testbench-step.failed { border-color: #8b4a50; background: #301e27; }
+.chip-testbench-step.passed { border-color: #356b50; }
+.chip-testbench-step.failed .chip-testbench-result { color: #ff9c9c; }
 .chip-wave-scroll { max-height: 260px; overflow: auto; border: 1px solid #2d3c50; border-radius: 5px; background: #101722; }
 .chip-wave-svg { display: block; min-width: 100%; }
 .chip-wave-grid { stroke: #273649; stroke-width: 1; }
 .chip-wave-label { fill: #91a1b5; font: 8px var(--font-mono); }
+.chip-wave-row { cursor: pointer; }
+.chip-wave-row:hover .chip-wave-hit { fill: #6da9ff18; }
+.chip-wave-hit { fill: transparent; }
 .chip-wave-path { fill: none; stroke: #48d89b; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chip-waveform-section > small { display: block; margin-top: 5px; color: #74849a; font-size: 9px; }
 .chip-sim-period { display: flex; justify-content: space-between; align-items: center; padding: 7px; color: #91a1b5; font-size: 10px; }
