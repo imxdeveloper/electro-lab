@@ -15,7 +15,6 @@ import { Toolbar } from '../ui/Toolbar.js';
 import { Outliner } from '../ui/Outliner.js';
 import { PropertiesPanel } from '../ui/PropertiesPanel.js';
 import { NavigationGizmo } from '../ui/NavigationGizmo.js';
-import { TimelineUI } from '../ui/TimelineUI.js';
 import { AddMenuModal } from '../ui/AddMenuModal.js';
 import { CompoundMenuModal } from '../ui/CompoundMenuModal.js';
 import { ElectronFieldMenuModal } from '../ui/ElectronFieldMenuModal.js';
@@ -317,7 +316,6 @@ export class Editor {
     this.outliner = new Outliner(this, this.sidebarEl);
     this.propertiesPanel = new PropertiesPanel(this, this.sidebarEl);
     this.navGizmo = new NavigationGizmo(this, this.viewportEl);
-    this.timelineUI = new TimelineUI(this, this.root);
     this.addMenuModal = new AddMenuModal(this);
     this.compoundMenuModal = new CompoundMenuModal(this);
     this.electronFieldMenuModal = new ElectronFieldMenuModal(this);
@@ -330,7 +328,6 @@ export class Editor {
       this.transformManager.updateAttachedObject(activeObj);
       this.outliner.update();
       this.propertiesPanel.update();
-      this.timelineUI.updateKeyframeMarkers();
       this.updateHUDText();
     };
 
@@ -605,12 +602,6 @@ export class Editor {
     this.sceneManager.onResize();
   }
 
-  toggleAnimationTimeline() {
-    this.timelineUI.el.hidden = !this.timelineUI.el.hidden;
-    this.sceneManager.onResize();
-    this.sceneManager.render();
-  }
-
   toggleViewportInformation() {
     this.infoOverlay.hidden = !this.infoOverlay.hidden;
   }
@@ -635,7 +626,6 @@ export class Editor {
   showAllPanels() {
     this.setSidebarVisible(true);
     if (!this.toolbar.visible) this.toggleToolbar();
-    this.timelineUI.el.hidden = false;
     this.infoOverlay.hidden = false;
     this.navigationGizmoVisible = true;
     this.navGizmo.wrapper.style.display = '';

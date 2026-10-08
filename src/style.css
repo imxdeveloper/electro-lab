@@ -135,13 +135,13 @@ button, input, select {
 .circuit-hint { margin-top: 10px; color: #9eacc0; font-size: 10px; line-height: 1.6; }
 
 .chip-lab {
-  position: fixed; z-index: 2147483646; inset: 38px 0 56px; display: flex; flex-direction: column;
+  position: fixed; z-index: 2147483646; inset: 38px 0 0; display: flex; flex-direction: column;
   overflow: hidden; background: #0d121a; color: #e0e8f1; font-size: 12px;
 }
 .chip-lab[hidden] { display: none; }
 
 .mask-lab {
-  position: fixed; z-index: 2147483645; inset: 38px 0 56px; display: flex; flex-direction: column;
+  position: fixed; z-index: 2147483645; inset: 38px 0 0; display: flex; flex-direction: column;
   overflow: hidden; background: #0d121a; color: #e0e8f1; font-size: 12px;
 }
 .mask-lab[hidden] { display: none; }
@@ -1507,133 +1507,6 @@ button, input, select {
   color: var(--text-main);
 }
 
-/* ==========================================================================
-   Bottom Timeline Bar
-   ========================================================================== */
-
-.electroDesigner-timeline {
-  height: 56px;
-  background-color: var(--bg-panel);
-  border-top: 1px solid var(--border-color);
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  gap: 12px;
-  z-index: 20;
-}
-.electroDesigner-timeline[hidden] { display: none !important; }
-.timeline-collapse-btn {
-  width: 24px; height: 24px; flex: 0 0 24px; border: 1px solid var(--border-color); border-radius: 4px;
-  background: var(--bg-header); color: var(--text-muted); cursor: pointer; font-size: 14px;
-}
-.timeline-collapse-btn:hover { color: var(--text-main); background: var(--bg-hover); }
-.electroDesigner-timeline.timeline-collapsed { height: 30px; min-height: 30px; flex: 0 0 30px; padding: 2px 8px; }
-.timeline-collapsed > :not(.timeline-collapse-btn) { display: none !important; }
-
-.timeline-controls {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.timeline-btn {
-  width: 28px;
-  height: 28px;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.timeline-btn:hover {
-  background-color: var(--bg-hover);
-  color: var(--text-main);
-}
-
-.timeline-btn.play {
-  color: var(--accent-orange);
-}
-
-.timeline-btn.keyframe-btn {
-  width: auto;
-  padding: 0 8px;
-  gap: 4px;
-  background-color: var(--bg-input);
-  border: 1px solid var(--border-color);
-}
-
-.timeline-frame-input {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 6px;
-  color: var(--text-muted);
-}
-
-.timeline-frame-input input {
-  width: 50px;
-  background-color: var(--bg-input);
-  border: 1px solid var(--border-color);
-  padding: 3px 6px;
-  border-radius: 3px;
-  text-align: center;
-  font-family: var(--font-mono);
-}
-
-.timeline-scrubber-track {
-  flex: 1;
-  height: 24px;
-  background-color: var(--bg-input);
-  border-radius: 4px;
-  border: 1px solid var(--border-color);
-  position: relative;
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.timeline-scrubber-cursor {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background-color: #51cf66;
-  pointer-events: none;
-}
-
-.timeline-scrubber-cursor::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -4px;
-  border-left: 5px solid transparent;
-  border-right: 5px solid transparent;
-  border-top: 6px solid #51cf66;
-}
-
-.timeline-keyframes-layer {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.timeline-kf-diamond {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.timeline-range-info {
-  display: flex;
-  gap: 8px;
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-}
 
 /* ==========================================================================
    Modals & Popups (Add Shift+A, Preferences, Shortcuts)

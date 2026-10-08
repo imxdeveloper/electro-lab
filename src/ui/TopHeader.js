@@ -85,7 +85,7 @@ export class TopHeader {
               <div class="menu-sub-header">Interface panels</div>
               <button data-action="toggle-sidebar" data-view-toggle="sidebar">Properties &amp; Outliner <span class="view-check">✓</span><span class="shortcut">N</span></button>
               <button data-action="toggle-toolbar" data-view-toggle="toolbar">Tool Shelf <span class="view-check">✓</span><span class="shortcut">T</span></button>
-              <button data-action="toggle-animation" data-view-toggle="animation">Animation Timeline <span class="view-check">✓</span></button>
+
               <button data-action="toggle-viewport-info" data-view-toggle="viewportInfo">Viewport Information <span class="view-check">✓</span></button>
               <button data-action="toggle-navigation-gizmo" data-view-toggle="navigationGizmo">Navigation Gizmo <span class="view-check">✓</span></button>
               <button data-action="toggle-circuit-tools" data-view-toggle="circuitTools">Circuit Lab Tools <span class="view-check">✓</span><span class="shortcut">F2</span></button>
@@ -353,9 +353,6 @@ export class TopHeader {
       case 'toggle-toolbar':
         this.editor.toggleToolbar();
         break;
-      case 'toggle-animation':
-        this.editor.toggleAnimationTimeline();
-        break;
       case 'toggle-viewport-info':
         this.editor.toggleViewportInformation();
         break;
@@ -402,7 +399,6 @@ export class TopHeader {
     const visibility = {
       sidebar: this.editor.sidebarVisible,
       toolbar: this.editor.toolbar.visible,
-      animation: !this.editor.timelineUI.el.hidden,
       viewportInfo: !this.editor.infoOverlay.hidden,
       navigationGizmo: this.editor.navigationGizmoVisible,
       circuitTools: this.editor.circuitDockVisible,
