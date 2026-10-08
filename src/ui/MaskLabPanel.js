@@ -60,6 +60,10 @@ export class MaskLabPanel {
     this.sourceDesign = null;
     this.brushMode = 'draw';
     this.isDrawing = false;
+    this.cellElements = [];
+    this.renderedGridWidth = 0;
+    this.renderedGridHeight = 0;
+    this.focusedCell = null;
     this.mask = this.createMask(this.gridWidth, this.gridHeight);
     this.learningProgress = this.loadLearningProgress();
     this.learningStats = this.loadLearningStats();
@@ -121,7 +125,7 @@ export class MaskLabPanel {
             <div class="mask-status" data-mask-status role="status" aria-live="polite"></div>
           </div>
           <div class="mask-grid-shell">
-            <div class="mask-grid" data-mask-grid aria-label="Mask editor grid"></div>
+            <div class="mask-grid" data-mask-grid role="group" aria-label="Mask pixels. Use arrow keys to move and Enter or Space to paint."></div>
           </div>
         </main>
         <aside class="mask-inspector">
@@ -134,6 +138,7 @@ export class MaskLabPanel {
           <div class="mask-control-group">
             <div class="mask-info-row"><span>Source</span><strong data-mask-source>Manual</strong></div>
             <div class="mask-info-row"><span>Power wiring</span><strong data-mask-power-status>Not checked</strong></div>
+            <p class="mask-source-details" data-mask-source-details>No Chip Lab source attached.</p>
             <div class="mask-info-row"><span>File</span><strong>JSON export</strong></div>
             <div class="mask-info-row"><span>Storage</span><strong>local browser</strong></div>
           </div>
@@ -171,6 +176,7 @@ export class MaskLabPanel {
     this.maskPathEl = this.el.querySelector('[data-mask-path]');
     this.maskSourceEl = this.el.querySelector('[data-mask-source]');
     this.maskPowerStatusEl = this.el.querySelector('[data-mask-power-status]');
+    this.maskSourceDetailsEl = this.el.querySelector('[data-mask-source-details]');
     this.statusEl = this.el.querySelector('[data-mask-status]');
 
     this.loadState();
@@ -188,7 +194,6 @@ export class MaskLabPanel {
     this.el.hidden = !active;
     if (!active && this.trainingSessionSnapshot) this.closeTraining();
     if (active) {
-      this.renderGrid();
       this.updateSummary();
     }
   }
@@ -217,10 +222,26 @@ export class MaskLabPanel {
     if (this.maskSourceEl) this.maskSourceEl.textContent = this.sourceDesign ? this.sourceDesign.name : 'Manual';
     if (this.maskPowerStatusEl) this.maskPowerStatusEl.textContent = this.sourceDesign?.powerCheck?.ok ? 'Connected' :
       this.sourceDesign?.powerCheck ? 'Review wiring' : 'Not checked';
+    if (this.maskSourceDetailsEl) {
+      if (!this.sourceDesign) {
+        this.maskSourceDetailsEl.textContent = 'No Chip Lab source attached.';
+      } else {
+        const unresolved = this.sourceDesign.simulation?.unresolvedComponents?.length || 0;
+        const passed = this.sourceDesign.testBench?.passed;
+        const tests = this.sourceDesign.testBench?.total;
+        this.maskSourceDetailsEl.textContent = `${this.sourceDesign.componentCount} components · ${this.sourceDesign.wireCount} wires · ${unresolved} unresolved${Number.isInteger(tests) ? ` · tests ${passed}/${tests}` : ''}`;
+      }
+    }
   }
 
   bindEvents() {
     this.el.addEventListener('click', (event) => {
+      const cell = event.target.closest('.mask-cell');
+      if (cell) {
+        this.paintCell(cell, this.brushMode === 'draw');
+        this.saveState();
+        return;
+      }
       const trigger = event.target.closest('[data-mask-action]');
       if (!trigger) return;
       const action = trigger.dataset.maskAction;
@@ -250,10 +271,44 @@ export class MaskLabPanel {
       this.saveState();
     });
 
+    this.gridEl.addEventListener('keydown', (event) => {
+      const cell = event.target.closest('.mask-cell');
+      if (!cell) return;
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        this.paintCell(cell, this.brushMode === 'draw');
+        this.saveState();
+        return;
+      }
+      const x = Number(cell.dataset.x);
+      const y = Number(cell.dataset.y);
+      let nextX = x;
+      let nextY = y;
+      if (event.key === 'ArrowLeft') nextX -= 1;
+      else if (event.key === 'ArrowRight') nextX += 1;
+      else if (event.key === 'ArrowUp') nextY -= 1;
+      else if (event.key === 'ArrowDown') nextY += 1;
+      else if (event.key === 'Home') {
+        nextX = 0;
+        if (event.ctrlKey) nextY = 0;
+      } else if (event.key === 'End') {
+        nextX = this.gridWidth - 1;
+        if (event.ctrlKey) nextY = this.gridHeight - 1;
+      }
+      else return;
+      event.preventDefault();
+      nextX = Math.max(0, Math.min(this.gridWidth - 1, nextX));
+      nextY = Math.max(0, Math.min(this.gridHeight - 1, nextY));
+      const nextCell = this.cellElements[nextY * this.gridWidth + nextX];
+      if (!nextCell) return;
+      this.focusCell(nextCell);
+    });
+
     this.gridEl.addEventListener('pointerdown', (event) => {
       const cell = event.target.closest('.mask-cell');
       if (!cell) return;
       this.isDrawing = true;
+      this.focusCell(cell);
       this.paintCell(cell, this.brushMode === 'draw');
     });
 
@@ -264,10 +319,13 @@ export class MaskLabPanel {
       this.paintCell(cell, this.brushMode === 'draw');
     }, true);
 
-    window.addEventListener('pointerup', () => {
+    const finishDrawing = () => {
+      if (!this.isDrawing) return;
       this.isDrawing = false;
       this.saveState();
-    });
+    };
+    window.addEventListener('pointerup', finishDrawing);
+    window.addEventListener('pointercancel', finishDrawing);
 
     this.el.addEventListener('click', (event) => {
       const action = event.target.closest('[data-mask-action]')?.dataset.maskAction;
@@ -297,6 +355,7 @@ export class MaskLabPanel {
     this.gridWidth = Math.max(8, Math.min(128, Number(width) || 64));
     this.gridHeight = Math.max(8, Math.min(128, Number(height) || this.gridWidth));
     this.mask = this.createMask(this.gridWidth, this.gridHeight);
+    this.sourceDesign = null;
     const sizeInput = this.el.querySelector('[data-mask-grid-size]');
     if (sizeInput && this.gridWidth === this.gridHeight) sizeInput.value = String(this.gridWidth);
     this.renderGrid();
@@ -307,11 +366,14 @@ export class MaskLabPanel {
   paintCellAt(x, y, value) {
     if (!Number.isInteger(x) || !Number.isInteger(y)) return false;
     if (x < 0 || y < 0 || x >= this.gridWidth || y >= this.gridHeight) return false;
-    this.mask[y][x] = Boolean(value);
-    const cell = this.gridEl?.querySelector(`.mask-cell[data-x="${x}"][data-y="${y}"]`);
+    const nextValue = Boolean(value);
+    if (this.mask[y][x] === nextValue) return true;
+    this.mask[y][x] = nextValue;
+    this.sourceDesign = null;
+    const cell = this.cellElements?.[y * this.gridWidth + x];
     if (cell) {
-      cell.classList.toggle('mask-on', Boolean(value));
-      cell.setAttribute('aria-pressed', String(Boolean(value)));
+      cell.classList.toggle('mask-on', nextValue);
+      cell.setAttribute('aria-pressed', String(nextValue));
     }
     this.updateSummary();
     return true;
@@ -325,7 +387,16 @@ export class MaskLabPanel {
     this.paintCellAt(x, y, value);
   }
 
+  focusCell(cell) {
+    if (!cell || cell === this.focusedCell) return;
+    if (this.focusedCell) this.focusedCell.tabIndex = -1;
+    this.focusedCell = cell;
+    this.focusedCell.tabIndex = 0;
+    this.focusedCell.focus();
+  }
+
   fillMask() {
+    this.sourceDesign = null;
     this.mask = this.createMask(this.gridWidth, this.gridHeight).map((row) => row.map(() => true));
     this.renderGrid();
     this.updateSummary();
@@ -333,6 +404,7 @@ export class MaskLabPanel {
   }
 
   clearMask() {
+    this.sourceDesign = null;
     this.mask = this.createMask(this.gridWidth, this.gridHeight);
     this.renderGrid();
     this.updateSummary();
@@ -340,6 +412,7 @@ export class MaskLabPanel {
   }
 
   invertMask() {
+    this.sourceDesign = null;
     this.mask = this.mask.map((row) => row.map((cell) => !cell));
     this.renderGrid();
     this.updateSummary();
@@ -469,22 +542,49 @@ export class MaskLabPanel {
     }
 
     const powerCheck = chipLab.inspectPowerRails?.() || null;
+    const simulation = chipLab.evaluate?.();
+    const outputNodes = nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const outputValues = outputNodes.map((node) => {
+      const value = simulation?.outputs.get(node.id);
+      return {
+        label: node.label,
+        value: Array.isArray(value) ? value.slice() : value ?? null
+      };
+    });
+    const unresolvedComponents = [...(simulation?.unresolved || [])]
+      .map((id) => nodes.find((node) => node.id === id)?.label || id);
+    const diagnostics = chipLab.analyzeDesign?.() || [];
+    const steps = chipLab.testBench?.steps || [];
+    const completedSteps = steps.filter((step) => typeof step.result === 'boolean');
     this.name = `${chipLab.chipName || 'Chip Lab'} mask`;
     this.sourceDesign = {
       name: chipLab.chipName || 'Chip Lab design',
+      designId: chipLab.designId || null,
       componentCount: nodes.length,
       wireCount: wires.length,
       generatedAt: new Date().toISOString(),
-      powerCheck
+      powerCheck,
+      simulation: {
+        outputs: outputValues,
+        unresolvedComponents,
+        diagnostics: diagnostics.map(({ severity, message }) => ({ severity, message }))
+      },
+      testBench: steps.length ? {
+        name: chipLab.testBench.name,
+        total: steps.length,
+        passed: completedSteps.filter((step) => step.result).length,
+        completed: completedSteps.length
+      } : null
     };
     const nameInput = this.el.querySelector('[data-mask-name]');
     if (nameInput) nameInput.value = this.name;
     this.renderGrid();
     this.updateSummary();
-    this.saveState();
-    this.setStatus(powerCheck?.ok
-      ? `Auto-filled a schematic mask from ${nodes.length} components and ${wires.length} wires. V+ and GND logic rails are connected.`
-      : `Auto-filled a schematic mask from ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck?.issues.join(' ') || 'power rails are not configured.'}`);
+    const stateSaved = this.saveState();
+    const status = powerCheck?.ok
+      ? `Auto-filled ${nodes.length} components and ${wires.length} wires. V+ and GND are connected; ${unresolvedComponents.length} unresolved component(s).`
+      : `Auto-filled ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck?.issues.join(' ') || 'power rails are not configured.'}`;
+    this.setStatus(`${status}${stateSaved ? '' : ' Autosave failed; export the mask to keep a copy.'}`);
     return true;
   }
 
@@ -493,12 +593,17 @@ export class MaskLabPanel {
   }
 
   saveState() {
-    if (typeof localStorage === 'undefined' || this.trainingSessionSnapshot) return;
+    if (this.trainingSessionSnapshot) return true;
     try {
+      if (typeof localStorage === 'undefined') throw new Error('localStorage is unavailable');
       const payload = this.exportMask();
       localStorage.setItem(MASK_STORAGE_KEY, JSON.stringify(payload));
+      this.setStatus('Autosaved in this browser.');
+      return true;
     } catch (error) {
-      console.warn('MaskLab could not save its state:', error);
+      console.error('MaskLab could not save its state:', error);
+      this.setStatus(`Autosave failed: ${error.message}. Export the mask to keep a copy.`);
+      return false;
     }
   }
 
@@ -546,20 +651,22 @@ export class MaskLabPanel {
   }
 
   saveLearningProgress() {
-    if (typeof localStorage === 'undefined') return;
     try {
+      if (typeof localStorage === 'undefined') throw new Error('localStorage is unavailable');
       localStorage.setItem(MASK_LEARNING_PROGRESS_KEY, JSON.stringify(this.learningProgress));
     } catch (error) {
-      console.warn('MaskLab could not save training progress:', error);
+      console.error('MaskLab could not save training progress:', error);
+      this.setStatus(`Training progress could not be saved: ${error.message}.`);
     }
   }
 
   saveLearningStats() {
-    if (typeof localStorage === 'undefined') return;
     try {
+      if (typeof localStorage === 'undefined') throw new Error('localStorage is unavailable');
       localStorage.setItem(MASK_LEARNING_STATS_KEY, JSON.stringify(this.learningStats));
     } catch (error) {
-      console.warn('MaskLab could not save training scores:', error);
+      console.error('MaskLab could not save training scores:', error);
+      this.setStatus(`Training scores could not be saved: ${error.message}.`);
     }
   }
 
@@ -743,22 +850,39 @@ export class MaskLabPanel {
 
   renderGrid() {
     if (!this.gridEl) return;
-    this.gridEl.innerHTML = '';
     this.gridEl.style.gridTemplateColumns = `repeat(${this.gridWidth}, minmax(0, 1fr))`;
     this.gridEl.style.gridTemplateRows = `repeat(${this.gridHeight}, minmax(0, 1fr))`;
-
+    const cellCount = this.gridWidth * this.gridHeight;
+    if (this.renderedGridWidth !== this.gridWidth ||
+        this.renderedGridHeight !== this.gridHeight ||
+        this.cellElements.length !== cellCount) {
+      const fragment = document.createDocumentFragment();
+      this.cellElements = [];
+      for (let y = 0; y < this.gridHeight; y += 1) {
+        for (let x = 0; x < this.gridWidth; x += 1) {
+          const cell = document.createElement('button');
+          cell.type = 'button';
+          cell.className = 'mask-cell';
+          cell.dataset.x = String(x);
+          cell.dataset.y = String(y);
+          cell.title = `Pixel ${x}, ${y}`;
+          cell.setAttribute('aria-label', `Pixel ${x}, ${y}`);
+          cell.tabIndex = x === 0 && y === 0 ? 0 : -1;
+          fragment.appendChild(cell);
+          this.cellElements.push(cell);
+        }
+      }
+      this.gridEl.replaceChildren(fragment);
+      this.renderedGridWidth = this.gridWidth;
+      this.renderedGridHeight = this.gridHeight;
+      this.focusedCell = this.cellElements[0] || null;
+    }
     for (let y = 0; y < this.gridHeight; y += 1) {
       for (let x = 0; x < this.gridWidth; x += 1) {
-        const cell = document.createElement('button');
-        cell.type = 'button';
-        cell.className = 'mask-cell';
-        cell.dataset.x = String(x);
-        cell.dataset.y = String(y);
-        cell.title = `Pixel ${x}, ${y}`;
-        cell.setAttribute('aria-label', `Pixel ${x}, ${y}`);
-        cell.setAttribute('aria-pressed', String(Boolean(this.mask[y][x])));
-        if (this.mask[y][x]) cell.classList.add('mask-on');
-        this.gridEl.appendChild(cell);
+        const cell = this.cellElements[y * this.gridWidth + x];
+        const active = Boolean(this.mask[y][x]);
+        cell.classList.toggle('mask-on', active);
+        cell.setAttribute('aria-pressed', String(active));
       }
     }
     this.updateSummary();

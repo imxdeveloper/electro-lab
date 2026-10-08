@@ -174,6 +174,7 @@ button, input, select {
 .mask-cell {
   appearance: none; border: 1px solid rgba(80, 103, 138, 0.35); background: #182331; padding: 0; cursor: crosshair;
 }
+.mask-cell:focus-visible { position: relative; z-index: 1; outline: 2px solid #dceaff; outline-offset: -2px; }
 .mask-cell.mask-on { background: linear-gradient(135deg, #d7e7ff, #7aa2ff); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); }
 .mask-panel-title { display: flex; justify-content: space-between; padding: 15px 14px 10px; color: #94a4b8; font: 600 9px var(--font-mono); letter-spacing: .12em; }
 .mask-control-group { padding: 8px 14px 12px; border-top: 1px solid #263244; }
@@ -185,6 +186,7 @@ button, input, select {
 .mask-brush.active { background: #2a5f90; border-color: #8ab6ff; }
 .mask-info-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; color: #b5c1d3; border-bottom: 1px solid rgba(74, 92, 114, 0.32); }
 .mask-info-row strong { color: #ebf4ff; }
+.mask-source-details { padding: 8px 0; color: #9aacc3; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
 .mask-learning-modal { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(7, 10, 15, 0.6); z-index: 2147483646; }
 .mask-learning-modal[hidden] { display: none; }
 .mask-learning-modal section { width: min(860px, calc(100vw - 64px)); max-height: calc(100vh - 120px); display: flex; flex-direction: column; background: #121a24; border: 1px solid #374a64; border-radius: 12px; box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32); overflow: hidden; }
@@ -210,6 +212,18 @@ button, input, select {
 .mask-learning-result { margin-top: 16px; padding: 10px 12px; border-radius: 6px; background: rgba(95, 117, 148, 0.14); color: #bfe2ff; }
 
 @media (max-width: 760px) {
+  .mask-topbar { flex-wrap: wrap; gap: 8px; padding: 8px 12px; }
+  .mask-brand { min-width: 0; }
+  .mask-name-label { margin-left: auto; }
+  .mask-name-label input { width: min(34vw, 180px); }
+  .mask-top-actions { width: 100%; margin: 0; justify-content: flex-start; }
+  .mask-top-actions button { padding: 6px 8px; }
+  .mask-workbench { grid-template-columns: 150px minmax(180px, 1fr); }
+  .mask-inspector { display: none; }
+  .mask-grid-shell { padding: 8px; }
+  .mask-grid { width: min(70vmin, 100%); height: min(70vmin, 100%); }
+  .mask-focus-bar { flex-wrap: wrap; justify-content: flex-start; padding: 8px; }
+  .mask-status { max-width: 100%; flex-basis: 100%; text-align: left; }
   .mask-learning-modal section { width: calc(100vw - 24px); max-height: calc(100vh - 80px); }
   .mask-learning-layout { grid-template-columns: 1fr; }
   .mask-learning-layout nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-right: 0; border-bottom: 1px solid #2d3c4f; }

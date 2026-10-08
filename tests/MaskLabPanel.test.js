@@ -19,6 +19,7 @@ const createPanel = (width = 16, height = 16) => {
   panel.activeTrainingLessonId = null;
   panel.learningPassed = false;
   panel.trainingSessionSnapshot = null;
+  panel.saveState = () => true;
   panel.saveLearningProgress = () => {};
   panel.saveLearningStats = () => {};
   panel.renderLearningPath = () => {};

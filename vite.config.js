@@ -7,6 +7,13 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/three/build/')) return 'three-vendor';
+        }
+      }
+    }
   }
 });

@@ -17,6 +17,10 @@ A browser-based 3D workspace for exploring atoms and molecules, building circuit
 2. **Production Pre-built**:
    - The production build is already compiled inside `/dist`.
 
+3. **Checks**:
+   - Run unit tests with `npm test` and a production build with `npm run build`.
+   - Install the Playwright Chromium browser once with `npx playwright install chromium`, then run the browser workflow checks with `npm run test:browser`.
+
 ---
 
 ## 🧩 Mask Lab
@@ -25,12 +29,15 @@ Mask Lab adds a 10 nm × 10 nm pixel-resolution drafting workspace for custom li
 
 - Open the workspace selector and choose **Mask Lab**.
 - Draw and erase individual pixels on a square grid.
+- Use the arrow keys to move between pixels and Enter or Space to toggle a pixel; only the focused pixel participates in Tab navigation.
 - Each pixel represents a 10 nm square, so a 64 × 64 mask covers 640 nm × 640 nm.
 - **Auto-fill from Chip Lab** rasterizes the current schematic's component outlines and routed connections onto the mask grid and records the source design with the export.
 - Chip Lab includes fixed V+ (logic HIGH) and GND (logic LOW) source terminals, with a wiring check for missing rails and both sources driving the same input.
 - V+ / GND checks are digital-schematic checks only; they do not model voltage, current, physical copper continuity, or electrical safety. The auto-filled mask is a schematic raster preview, not a fabrication-ready chip layout.
 - Export the current mask as JSON for reuse or downstream tooling.
+- Mask edits autosave in the browser; if storage is blocked or full, Mask Lab reports the failure and recommends exporting a copy. Chip Lab source, power-check, simulation, and test-bench provenance stays with an untouched auto-filled mask and its JSON export.
 - Use **Training** for four guided exercises: a single feature, a parallel line pair, a square frame, and a 4 × 4 array. Exact mask checks, hints, scores, and completion progress are saved in the browser. Training preserves and restores the mask you were editing.
+- The 3D viewport animation pauses while a 2D lab is open or the browser tab is hidden, then resumes when returning to the 3D workspaces.
 
 ---
 

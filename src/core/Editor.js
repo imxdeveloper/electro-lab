@@ -1,10 +1,4 @@
 import * as THREE from 'three';
-import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import { OBJExporter } from 'three/addons/exporters/OBJExporter.js';
-import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
-import { STLLoader } from 'three/addons/loaders/STLLoader.js';
 
 import { GeometryUtils } from '../utils/GeometryUtils.js';
 import { SceneManager } from './SceneManager.js';
@@ -30,14 +24,14 @@ import { PreferencesModal } from '../ui/PreferencesModal.js';
 import { ShortcutsModal } from '../ui/ShortcutsModal.js';
 import { CodeEditorPanel } from '../ui/CodeEditorPanel.js';
 import { BoardPanel } from '../ui/BoardPanel.js';
-import { ChipLabPanel } from '../ui/ChipLabPanel.js';
-import { MaskLabPanel } from '../ui/MaskLabPanel.js';
 
 export class Editor {
   constructor(rootContainer) {
     this.root = rootContainer;
     this.geometryUtils = GeometryUtils;
     this.workspaceMode = 'atoms';
+    this.workspaceRequestId = 0;
+    this.loopFrameId = null;
     this.circuitDockVisible = false;
     this.navigationGizmoVisible = true;
 
@@ -49,15 +43,33 @@ export class Editor {
     this.initComponents();
     this.codeEditorPanel = new CodeEditorPanel(this);
     this.boardPanel = new BoardPanel(this);
-    this.chipLabPanel = new ChipLabPanel(this);
-    this.maskLabPanel = new MaskLabPanel(this);
-    this.root.appendChild(this.maskLabPanel.el);
     this.bindGlobalEvents();
     this.startLoop();
   }
 
-  setWorkspaceMode(mode) {
-    if (!['atoms', 'circuits', 'chips', 'masks'].includes(mode) || this.workspaceMode === mode) return;
+  async setWorkspaceMode(mode) {
+    if (!['atoms', 'circuits', 'chips', 'masks'].includes(mode)) return;
+    const requestId = ++this.workspaceRequestId;
+    if (this.workspaceMode === mode) return;
+    try {
+      if (mode === 'chips' && !this.chipLabPanel) {
+        const { ChipLabPanel } = await import('../ui/ChipLabPanel.js');
+        if (requestId !== this.workspaceRequestId) return;
+        this.chipLabPanel = new ChipLabPanel(this);
+      }
+      if (mode === 'masks' && !this.maskLabPanel) {
+        const { MaskLabPanel } = await import('../ui/MaskLabPanel.js');
+        if (requestId !== this.workspaceRequestId) return;
+        this.maskLabPanel = new MaskLabPanel(this);
+        this.root.appendChild(this.maskLabPanel.el);
+      }
+    } catch (error) {
+      console.error(`Could not load the ${mode} workspace:`, error);
+      this.topHeader?.updateWorkspaceMode(this.workspaceMode);
+      alert(`Could not open ${mode} workspace: ${error.message}`);
+      return;
+    }
+    if (requestId !== this.workspaceRequestId) return;
     this.setCircuitToolMode?.(null);
     this.workspaceMode = mode;
     this.sceneManager.updateWorkspaceBackground();
@@ -139,6 +151,7 @@ export class Editor {
       this.sceneManager.render();
       this.navGizmo?.render();
     });
+    this.startLoop();
   }
 
   initLayout() {
@@ -647,75 +660,63 @@ export class Editor {
     active.material.needsUpdate = true;
   }
 
-  importModelFile(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const reader = new FileReader();
-
-    if (ext === 'gltf' || ext === 'glb') {
-      reader.onload = (e) => {
-        const loader = new GLTFLoader();
-        loader.parse(e.target.result, '', (gltf) => {
-          const root = gltf.scene;
-          root.name = file.name.replace(/\.[^/.]+$/, '');
-          this.sceneManager.addObject(root);
-          this.selectionManager.select(root, false);
-          this.navigation.frameSelected();
+  async importModelFile(file) {
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    const name = file.name.replace(/\.[^/.]+$/, '');
+    try {
+      let object;
+      if (ext === 'gltf' || ext === 'glb') {
+        const [{ GLTFLoader }] = await Promise.all([import('three/addons/loaders/GLTFLoader.js')]);
+        const data = await file.arrayBuffer();
+        const gltf = await new Promise((resolve, reject) => {
+          new GLTFLoader().parse(data, '', resolve, reject);
         });
-      };
-      reader.readAsArrayBuffer(file);
-    } else if (ext === 'obj') {
-      reader.onload = (e) => {
-        const loader = new OBJLoader();
-        const obj = loader.parse(e.target.result);
-        obj.name = file.name.replace(/\.[^/.]+$/, '');
-        this.sceneManager.addObject(obj);
-        this.selectionManager.select(obj, false);
-        this.navigation.frameSelected();
-      };
-      reader.readAsText(file);
-    } else if (ext === 'stl') {
-      reader.onload = (e) => {
-        const loader = new STLLoader();
-        const geom = loader.parse(e.target.result);
-        const mat = new THREE.MeshStandardMaterial({ color: 0xd4d4d4, roughness: 0.5 });
-        const mesh = new THREE.Mesh(geom, mat);
-        mesh.name = file.name.replace(/\.[^/.]+$/, '');
-        this.sceneManager.addObject(mesh);
-        this.selectionManager.select(mesh, false);
-        this.navigation.frameSelected();
-      };
-      reader.readAsArrayBuffer(file);
-    } else {
-      alert('Unsupported file format. Please upload .gltf, .glb, .obj, or .stl');
+        object = gltf.scene;
+      } else if (ext === 'obj') {
+        const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
+        object = new OBJLoader().parse(await file.text());
+      } else if (ext === 'stl') {
+        const { STLLoader } = await import('three/addons/loaders/STLLoader.js');
+        const geometry = new STLLoader().parse(await file.arrayBuffer());
+        object = new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color: 0xd4d4d4, roughness: 0.5 }));
+      } else {
+        alert('Unsupported file format. Please upload .gltf, .glb, .obj, or .stl');
+        return;
+      }
+      object.name = name;
+      this.sceneManager.addObject(object);
+      this.selectionManager.select(object, false);
+      this.navigation.frameSelected();
+    } catch (error) {
+      console.error(`Could not import ${file.name}:`, error);
+      alert(`Could not import ${file.name}: ${error.message}`);
     }
   }
 
-  exportModel(format) {
+  async exportModel(format) {
     const exportTargets = this.sceneManager.objectsList.filter(
       (o) => !o.name.startsWith('__')
     );
     const exportGroup = new THREE.Group();
     exportTargets.forEach((o) => exportGroup.add(o.clone()));
 
-    if (format === 'gltf') {
-      const exporter = new GLTFExporter();
-      exporter.parse(
-        exportGroup,
-        (gltf) => {
-          const output = JSON.stringify(gltf, null, 2);
-          this.downloadBlob(new Blob([output], { type: 'application/json' }), 'scene.gltf');
-        },
-        (err) => console.error(err),
-        { binary: false }
-      );
-    } else if (format === 'obj') {
-      const exporter = new OBJExporter();
-      const result = exporter.parse(exportGroup);
-      this.downloadBlob(new Blob([result], { type: 'text/plain' }), 'scene.obj');
-    } else if (format === 'stl') {
-      const exporter = new STLExporter();
-      const result = exporter.parse(exportGroup, { binary: true });
-      this.downloadBlob(new Blob([result], { type: 'application/octet-stream' }), 'scene.stl');
+    try {
+      if (format === 'gltf') {
+        const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+        const gltf = await new Promise((resolve, reject) => {
+          new GLTFExporter().parse(exportGroup, resolve, reject, { binary: false });
+        });
+        this.downloadBlob(new Blob([JSON.stringify(gltf, null, 2)], { type: 'application/json' }), 'scene.gltf');
+      } else if (format === 'obj') {
+        const { OBJExporter } = await import('three/addons/exporters/OBJExporter.js');
+        this.downloadBlob(new Blob([new OBJExporter().parse(exportGroup)], { type: 'text/plain' }), 'scene.obj');
+      } else if (format === 'stl') {
+        const { STLExporter } = await import('three/addons/exporters/STLExporter.js');
+        this.downloadBlob(new Blob([new STLExporter().parse(exportGroup, { binary: true })], { type: 'application/octet-stream' }), 'scene.stl');
+      }
+    } catch (error) {
+      console.error(`Could not export the scene as ${format}:`, error);
+      alert(`Could not export the scene as ${format}: ${error.message}`);
     }
   }
 
@@ -731,16 +732,20 @@ export class Editor {
     const exportGroup = new THREE.Group();
     exportGroup.name = 'Electro Designer Circuit';
     circuitObjects.forEach((object) => exportGroup.add(object.clone()));
-    const exporter = new GLTFExporter();
-    exporter.parse(
-      exportGroup,
-      (output) => this.downloadBlob(new Blob([output], { type: 'model/gltf-binary' }), 'electroDesigner_circuit.glb'),
-      (error) => {
-        console.error('Circuit GLB export failed:', error);
-        alert('Could not export the circuit as a 3D model. See the console for details.');
-      },
-      { binary: true }
-    );
+    import('three/addons/exporters/GLTFExporter.js').then(({ GLTFExporter }) => {
+      new GLTFExporter().parse(
+        exportGroup,
+        (output) => this.downloadBlob(new Blob([output], { type: 'model/gltf-binary' }), 'electroDesigner_circuit.glb'),
+        (error) => {
+          console.error('Circuit GLB export failed:', error);
+          alert('Could not export the circuit as a 3D model. See the console for details.');
+        },
+        { binary: true }
+      );
+    }).catch((error) => {
+      console.error('Could not load the GLTF exporter:', error);
+      alert(`Could not export the circuit as a 3D model: ${error.message}`);
+    });
   }
 
   setCircuitToolMode(mode) {
@@ -1160,14 +1165,24 @@ export class Editor {
   }
 
   startLoop() {
+    if (this.loopFrameId !== null || document.hidden ||
+        (this.workspaceMode !== 'atoms' && this.workspaceMode !== 'circuits')) return;
     let previousFrame = performance.now();
     const render = (now) => {
-      this.sceneManager.updateAnimations((now - previousFrame) / 1000);
+      this.loopFrameId = null;
+      if (document.hidden || (this.workspaceMode !== 'atoms' && this.workspaceMode !== 'circuits')) return;
+      this.sceneManager.updateAnimations(Math.min((now - previousFrame) / 1000, 0.1));
       previousFrame = now;
       this.sceneManager.render();
       this.navGizmo.render();
-      requestAnimationFrame(render);
+      this.loopFrameId = requestAnimationFrame(render);
     };
-    requestAnimationFrame(render);
+    this.loopFrameId = requestAnimationFrame(render);
+    if (!this._loopVisibilityHandler) {
+      this._loopVisibilityHandler = () => {
+        if (!document.hidden) this.startLoop();
+      };
+      document.addEventListener('visibilitychange', this._loopVisibilityHandler);
+    }
   }
 }
