@@ -110,6 +110,7 @@ export class ChipLabPanel {
           <button type="button" data-chip-action="import">Import</button>
           <button type="button" data-chip-action="import-hdl">Import Verilog</button>
           <button type="button" data-chip-action="export-hdl">Export Verilog</button>
+          <button type="button" data-chip-action="generate-mask">Generate Mask</button>
           <button type="button" data-chip-action="export" class="chip-primary">Export design</button>
           <input type="file" accept=".json,application/json" data-chip-file hidden>
           <input type="file" accept=".v,.sv,text/plain" data-chip-hdl-file hidden>
@@ -524,6 +525,13 @@ export class ChipLabPanel {
   }
 
   handleAction(action, detail = {}) {
+    if (action === 'generate-mask') {
+      this.editor.setWorkspaceMode('masks').then(() => {
+        if (this.editor.workspaceMode === 'masks') {
+          this.editor.maskLabPanel?.autoFillFromChipDesign();
+        }
+      });
+    }
     if (action === 'new') {
       this.commitHistory();
       this.stopClock();

@@ -25,15 +25,19 @@ A browser-based 3D workspace for exploring atoms and molecules, building circuit
 
 ## 🧩 Mask Lab
 
-Mask Lab adds a 10 nm × 10 nm pixel-resolution drafting workspace for custom lithography masks.
+Mask Lab provides separate SKY130, GF180MCU, and process-agnostic educational profiles, each with independent editable layer masks. The 10 nm × 10 nm grid is an editor display raster, not a PDK manufacturing grid.
 
 - Open the workspace selector and choose **Mask Lab**.
+- Switch between the three technology sub-tabs and select a process layer from its layer stack; pixel data is maintained independently for each profile and layer.
 - Draw and erase individual pixels on a square grid.
 - Use the arrow keys to move between pixels and Enter or Space to toggle a pixel; only the focused pixel participates in Tab navigation.
-- Each pixel represents a 10 nm square, so a 64 × 64 mask covers 640 nm × 640 nm.
-- **Auto-fill from Chip Lab** rasterizes the current schematic's component outlines and routed connections onto the mask grid and records the source design with the export.
-- Chip Lab includes fixed V+ (logic HIGH) and GND (logic LOW) source terminals, with a wiring check for missing rails and both sources driving the same input.
-- V+ / GND checks are digital-schematic checks only; they do not model voltage, current, physical copper continuity, or electrical safety. The auto-filled mask is a schematic raster preview, not a fabrication-ready chip layout.
+- The educational profile uses 10 nm editor-raster cells, so a 64 × 64 canvas displays 640 nm × 640 nm.
+- In the Educational profile, **Auto-fill from Chip Lab** rasterizes the current schematic's component outlines and routed connections onto the mask grid and records the source design with the export.
+- Use Chip Lab's **Generate Mask** button to create the raster and jump directly to Mask Lab. Changing the grid size keeps pixels at their existing coordinates where they fit; shrinking the grid clips pixels beyond its new edges.
+- SKY130 and GF180MCU tabs provide reference layer sets; GF180MCU includes documented GDS layer/datatype, mask number, and polarity metadata where listed by its design manual.
+- Auto-fill from Chip Lab and pattern training are restricted to the process-agnostic educational profile so schematic artwork is not mistaken for a process layout.
+- PDK tabs are educational drafting previews only: they do not run foundry DRC/LVS, implement a PDK grid or full layer map, or export verified GDSII/OASIS. GF180MCU's open PDK currently identifies itself as an experimental preview. Consult the [SKY130 layer reference](https://skywater-pdk.readthedocs.io/en/main/rules/layers.html), [GF180MCU drawn-layer table](https://gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/drm_04_1.html), and [GF180MCU mask-layer numbering](https://gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/drm_04_3.html) and use the matching installed PDK/tool flow for physical signoff.
+- Chip Lab includes fixed V+ (logic HIGH) and GND (logic LOW) source terminals, with a wiring check for missing rails and both sources driving the same input. Those are digital checks only; they do not model voltage, current, copper continuity, or electrical safety.
 - Export the current mask as JSON for reuse or downstream tooling.
 - Mask edits autosave in the browser; if storage is blocked or full, Mask Lab reports the failure and recommends exporting a copy. Chip Lab source, power-check, simulation, and test-bench provenance stays with an untouched auto-filled mask and its JSON export.
 - Use **Training** for four guided exercises: a single feature, a parallel line pair, a square frame, and a 4 × 4 array. Exact mask checks, hints, scores, and completion progress are saved in the browser. Training preserves and restores the mask you were editing.

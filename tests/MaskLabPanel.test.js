@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MaskLabPanel, MASK_LESSONS } from '../src/ui/MaskLabPanel.js';
+import { DEFAULT_MASK_TECHNOLOGY_ID, MASK_TECHNOLOGIES } from '../src/data/MaskTechnologyProfiles.js';
 
 const createPanel = (width = 16, height = 16) => {
   const panel = Object.create(MaskLabPanel.prototype);
@@ -8,9 +9,13 @@ const createPanel = (width = 16, height = 16) => {
   panel.gridWidth = width;
   panel.gridHeight = height;
   panel.name = 'MaskLab';
+  panel.technologyId = DEFAULT_MASK_TECHNOLOGY_ID;
+  panel.profileLayouts = panel.createProfileLayouts(width, height);
+  panel.layerMasks = panel.profileLayouts[panel.technologyId].layers;
+  panel.activeLayerId = panel.profileLayouts[panel.technologyId].activeLayerId;
   panel.el = { querySelector: () => null };
   panel.brushMode = 'draw';
-  panel.mask = panel.createMask(width, height);
+  panel.mask = panel.layerMasks[panel.activeLayerId];
   panel.learningProgress = [];
   panel.learningStats = {};
   panel.learningLessonIndex = 0;
@@ -23,6 +28,9 @@ const createPanel = (width = 16, height = 16) => {
   panel.saveLearningProgress = () => {};
   panel.saveLearningStats = () => {};
   panel.renderLearningPath = () => {};
+  panel.renderTechnologyProfile = () => {};
+  panel.renderGrid = () => {};
+  panel.updateSummary = () => {};
   return panel;
 };
 
@@ -53,6 +61,70 @@ test('mask drawing, clear, fill, and invert update the grid state', () => {
 
   panel.clearMask();
   assert.equal(panel.mask.flat().every((value) => value === false), true);
+});
+
+test('resizing the grid preserves pixels at their existing coordinates', () => {
+  const panel = createPanel(16, 16);
+  panel.paintCellAt(3, 4, true);
+  panel.paintCellAt(14, 15, true);
+
+  panel.resizeGrid(24, 20);
+
+  assert.equal(panel.mask[4][3], true);
+  assert.equal(panel.mask[15][14], true);
+  assert.equal(panel.getSummary().activePixels, 2);
+
+  panel.resizeGrid(8, 8);
+
+  assert.equal(panel.mask[4][3], true);
+  assert.equal(panel.getSummary().activePixels, 1);
+});
+
+test('technology profiles keep their layers isolated and restore the prior layer', () => {
+  const panel = createPanel(16, 16);
+  const genericLayer = panel.activeLayerId;
+  panel.paintCellAt(2, 3, true);
+  panel.selectLayer('gate');
+  panel.paintCellAt(7, 8, true);
+
+  panel.selectTechnology('sky130');
+  assert.equal(panel.activeLayerId, MASK_TECHNOLOGIES[0].layers[0].id);
+  panel.selectLayer('met1');
+  panel.paintCellAt(4, 5, true);
+  panel.selectTechnology(DEFAULT_MASK_TECHNOLOGY_ID);
+
+  assert.equal(panel.activeLayerId, 'gate');
+  assert.equal(panel.mask[8][7], true);
+  assert.equal(panel.mask[3][2], false);
+  panel.selectLayer(genericLayer);
+  assert.equal(panel.mask[3][2], true);
+  assert.equal(panel.mask[8][7], false);
+});
+
+test('technology profile export/import preserves each layer independently', () => {
+  const original = createPanel(16, 16);
+  original.selectTechnology('gf180mcu');
+  original.selectLayer('metal1');
+  original.paintCellAt(9, 10, true);
+  original.selectLayer('comp');
+  original.paintCellAt(4, 5, true);
+
+  const restored = createPanel();
+  assert.equal(restored.importMask(original.exportMask()), true);
+  assert.equal(restored.technologyId, 'gf180mcu');
+  assert.equal(restored.activeLayerId, 'comp');
+  assert.equal(restored.mask[5][4], true);
+  restored.selectLayer('metal1');
+  assert.equal(restored.mask[10][9], true);
+  assert.equal(restored.mask[5][4], false);
+});
+
+test('Chip Lab schematic rasterization is blocked in foundry profiles', () => {
+  const panel = createPanel();
+  panel.technologyId = 'sky130';
+  panel.editor = { chipLabPanel: { nodes: [{ id: 'gate', x: 0, y: 0 }] } };
+
+  assert.equal(panel.autoFillFromChipDesign(), false);
 });
 
 test('export and import preserve the mask layout and dimensions', () => {

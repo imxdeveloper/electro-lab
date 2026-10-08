@@ -1,3 +1,9 @@
+import {
+  DEFAULT_MASK_TECHNOLOGY_ID,
+  MASK_EDITOR_GRID_PITCH_NM,
+  MASK_TECHNOLOGIES
+} from '../data/MaskTechnologyProfiles.js';
+
 const MASK_STORAGE_KEY = 'electroDesigner.maskLab.current';
 const MASK_LEARNING_PROGRESS_KEY = 'electroDesigner.maskLab.learningProgress';
 const MASK_LEARNING_STATS_KEY = 'electroDesigner.maskLab.learningStats';
@@ -53,10 +59,14 @@ export const MASK_LESSONS = [
 export class MaskLabPanel {
   constructor(editor) {
     this.editor = editor;
-    this.pixelSizeNm = 10;
+    this.pixelSizeNm = MASK_EDITOR_GRID_PITCH_NM;
     this.gridWidth = 64;
     this.gridHeight = 64;
     this.name = 'MaskLab';
+    this.technologyId = DEFAULT_MASK_TECHNOLOGY_ID;
+    this.profileLayouts = this.createProfileLayouts(this.gridWidth, this.gridHeight);
+    this.layerMasks = this.profileLayouts[this.technologyId].layers;
+    this.activeLayerId = this.profileLayouts[this.technologyId].activeLayerId;
     this.sourceDesign = null;
     this.brushMode = 'draw';
     this.isDrawing = false;
@@ -64,7 +74,7 @@ export class MaskLabPanel {
     this.renderedGridWidth = 0;
     this.renderedGridHeight = 0;
     this.focusedCell = null;
-    this.mask = this.createMask(this.gridWidth, this.gridHeight);
+    this.mask = this.layerMasks[this.activeLayerId];
     this.learningProgress = this.loadLearningProgress();
     this.learningStats = this.loadLearningStats();
     this.learningLessonIndex = 0;
@@ -83,7 +93,7 @@ export class MaskLabPanel {
           <span class="mask-brand-mark">M</span>
           <div>
             <strong>Mask Lab</strong>
-            <small>10 nm × 10 nm pixel mask editor</small>
+            <small>Technology profiles · multi-layer editor</small>
           </div>
         </div>
         <label class="mask-name-label">MASK NAME<input data-mask-name maxlength="48" value="MaskLab" aria-label="Mask name"></label>
@@ -96,9 +106,20 @@ export class MaskLabPanel {
           <button type="button" data-mask-action="export" class="mask-primary">Export</button>
         </div>
       </header>
+      <nav class="mask-technology-tabs" role="tablist" aria-label="Mask technology profile">
+        ${MASK_TECHNOLOGIES.map((technology) => `
+          <button type="button" id="mask-technology-tab-${technology.id}" role="tab" aria-controls="mask-profile-panel" tabindex="${technology.id === this.technologyId ? '0' : '-1'}" data-mask-technology="${technology.id}" aria-selected="${technology.id === this.technologyId}">
+            ${technology.label}
+          </button>`).join('')}
+      </nav>
+      <section class="mask-profile-notice" id="mask-profile-panel" role="tabpanel" aria-labelledby="mask-technology-tab-${this.technologyId}" data-mask-profile-notice aria-live="polite"></section>
       <div class="mask-workbench">
         <aside class="mask-tools">
           <div class="mask-panel-title"><span>CONTROLS</span></div>
+          <div class="mask-control-group">
+            <div class="mask-layer-heading">PROCESS LAYERS</div>
+            <div class="mask-layer-list" data-mask-layer-list aria-label="Drawing layer"></div>
+          </div>
           <div class="mask-control-group">
             <label>
               <span>Grid size</span>
@@ -112,15 +133,17 @@ export class MaskLabPanel {
           </div>
           <div class="mask-control-group">
             <label>
-              <span>Pixel pitch</span>
-              <input type="text" value="10 nm" readonly>
+              <span>Editor raster pitch</span>
+              <input type="text" value="${this.pixelSizeNm} nm" readonly>
             </label>
             <div class="mask-size-readout" data-mask-dimension-readout>640 nm × 640 nm</div>
+            <small class="mask-control-note">Display raster only; not the PDK manufacturing grid.</small>
           </div>
         </aside>
         <main class="mask-editor-panel">
           <div class="mask-focus-bar">
             <div class="mask-summary" data-mask-summary>0 / 4096 pixels lit</div>
+            <div class="mask-layer-indicator" data-mask-active-layer></div>
             <div class="mask-path" data-mask-path>MaskLab</div>
             <div class="mask-status" data-mask-status role="status" aria-live="polite"></div>
           </div>
@@ -131,7 +154,7 @@ export class MaskLabPanel {
         <aside class="mask-inspector">
           <div class="mask-panel-title"><span>DETAILS</span></div>
           <div class="mask-control-group">
-            <div class="mask-info-row"><span>Resolution</span><strong>10 nm / pixel</strong></div>
+            <div class="mask-info-row"><span>Editor raster</span><strong>10 nm / pixel</strong></div>
             <div class="mask-info-row"><span>Mask area</span><strong data-mask-area>640 nm × 640 nm</strong></div>
             <div class="mask-info-row"><span>Cells active</span><strong data-mask-count>0</strong></div>
           </div>
@@ -178,16 +201,177 @@ export class MaskLabPanel {
     this.maskPowerStatusEl = this.el.querySelector('[data-mask-power-status]');
     this.maskSourceDetailsEl = this.el.querySelector('[data-mask-source-details]');
     this.statusEl = this.el.querySelector('[data-mask-status]');
+    this.activeLayerEl = this.el.querySelector('[data-mask-active-layer]');
+    this.technologyTabsEl = this.el.querySelector('.mask-technology-tabs');
+    this.profileNoticeEl = this.el.querySelector('[data-mask-profile-notice]');
+    this.layerListEl = this.el.querySelector('[data-mask-layer-list]');
+    this.autoFillButton = this.el.querySelector('[data-mask-action="auto-fill-chip"]');
 
     this.loadState();
     this.bindEvents();
     this.renderGrid();
+    this.renderTechnologyProfile();
     this.updateSummary();
     this.renderLearningPath();
   }
 
   createMask(width, height) {
     return Array.from({ length: height }, () => Array.from({ length: width }, () => false));
+  }
+
+  createProfileLayouts(width, height) {
+    return Object.fromEntries(MASK_TECHNOLOGIES.map((technology) => [
+      technology.id,
+      {
+        width,
+        height,
+        activeLayerId: technology.layers[0].id,
+        name: 'MaskLab',
+        sourceDesign: null,
+        layers: Object.fromEntries(technology.layers.map(({ id }) => [id, this.createMask(width, height)]))
+      }
+    ]));
+  }
+
+  getTechnology() {
+    return MASK_TECHNOLOGIES.find(({ id }) => id === this.technologyId) || MASK_TECHNOLOGIES[2];
+  }
+
+  syncProfileLayout() {
+    this.layerMasks[this.activeLayerId] = this.mask;
+    const layout = this.profileLayouts[this.technologyId];
+    layout.width = this.gridWidth;
+    layout.height = this.gridHeight;
+    layout.activeLayerId = this.activeLayerId;
+    layout.name = this.name;
+    layout.sourceDesign = this.sourceDesign;
+    layout.layers = this.layerMasks;
+  }
+
+  setCurrentLayerMask(mask) {
+    this.mask = mask;
+    this.layerMasks[this.activeLayerId] = mask;
+  }
+
+  selectTechnology(technologyId) {
+    const technology = MASK_TECHNOLOGIES.find(({ id }) => id === technologyId);
+    if (!technology || technology.id === this.technologyId) return false;
+    if (this.trainingSessionSnapshot) {
+      this.setStatus('Close the training challenge before changing technology profiles.');
+      return false;
+    }
+    this.syncProfileLayout();
+    this.technologyId = technology.id;
+    const layout = this.profileLayouts[technology.id];
+    this.gridWidth = layout.width;
+    this.gridHeight = layout.height;
+    this.layerMasks = layout.layers;
+    this.activeLayerId = layout.activeLayerId;
+    this.mask = this.layerMasks[this.activeLayerId];
+    this.name = layout.name;
+    this.sourceDesign = layout.sourceDesign;
+    const nameInput = this.el?.querySelector('[data-mask-name]');
+    if (nameInput) nameInput.value = this.name;
+    const sizeInput = this.el?.querySelector('[data-mask-grid-size]');
+    if (sizeInput) sizeInput.value = String(this.gridWidth);
+    this.renderTechnologyProfile();
+    this.renderGrid();
+    this.updateSummary();
+    this.saveState();
+    return true;
+  }
+
+  selectLayer(layerId) {
+    if (!this.layerMasks[layerId] || layerId === this.activeLayerId) return false;
+    this.syncProfileLayout();
+    this.activeLayerId = layerId;
+    this.mask = this.layerMasks[layerId];
+    this.profileLayouts[this.technologyId].activeLayerId = layerId;
+    this.renderTechnologyProfile();
+    this.renderGrid();
+    this.updateSummary();
+    this.saveState();
+    return true;
+  }
+
+  renderTechnologyProfile() {
+    const technology = this.getTechnology();
+    this.technologyTabsEl?.querySelectorAll('[data-mask-technology]').forEach((button) => {
+      const selected = button.dataset.maskTechnology === technology.id;
+      button.setAttribute('aria-selected', String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      button.classList.toggle('active', selected);
+    });
+    this.profileNoticeEl?.setAttribute('aria-labelledby', `mask-technology-tab-${technology.id}`);
+    if (this.profileNoticeEl) {
+      this.profileNoticeEl.replaceChildren();
+      const info = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = technology.name;
+      const status = document.createElement('span');
+      status.textContent = technology.status;
+      const description = document.createElement('p');
+      description.textContent = technology.description;
+      info.append(title, status, description);
+      this.profileNoticeEl.appendChild(info);
+      if (technology.sourceUrl) {
+        const source = document.createElement('a');
+        source.href = technology.sourceUrl;
+        source.target = '_blank';
+        source.rel = 'noreferrer';
+        source.textContent = 'Layer documentation';
+        this.profileNoticeEl.appendChild(source);
+      }
+      if (technology.maskSourceUrl) {
+        const source = document.createElement('a');
+        source.href = technology.maskSourceUrl;
+        source.target = '_blank';
+        source.rel = 'noreferrer';
+        source.textContent = 'Mask numbering and polarity';
+        this.profileNoticeEl.appendChild(source);
+      }
+      if (technology.statusSourceUrl) {
+        const source = document.createElement('a');
+        source.href = technology.statusSourceUrl;
+        source.target = '_blank';
+        source.rel = 'noreferrer';
+        source.textContent = 'PDK status';
+        this.profileNoticeEl.appendChild(source);
+      }
+      const warning = document.createElement('strong');
+      warning.className = 'mask-profile-warning';
+      warning.textContent = technology.id === 'generic'
+        ? 'Educational drawing only. No PDK rules or fabrication validity are implied.'
+        : 'Editor raster is not a PDK manufacturing grid. No DRC, LVS, GDS/OASIS export, or foundry signoff is performed.';
+      this.profileNoticeEl.appendChild(warning);
+    }
+    if (this.autoFillButton) {
+      this.autoFillButton.disabled = technology.id !== 'generic';
+      this.autoFillButton.title = technology.id === 'generic'
+        ? 'Rasterize the Chip Lab schematic for educational preview'
+        : 'Schematic rasterization is only available in the Educational profile';
+    }
+    if (this.layerListEl) {
+      this.layerListEl.replaceChildren();
+      technology.layers.forEach((entry) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.dataset.maskLayer = entry.id;
+        button.setAttribute('aria-pressed', String(entry.id === this.activeLayerId));
+        button.classList.toggle('active', entry.id === this.activeLayerId);
+        const swatch = document.createElement('span');
+        swatch.className = 'mask-layer-swatch';
+        swatch.style.backgroundColor = entry.color;
+        const label = document.createElement('span');
+        label.className = 'mask-layer-label';
+        label.textContent = entry.label;
+        const detail = document.createElement('small');
+        detail.textContent = entry.stream ? `GDS ${entry.stream}` : entry.description;
+        button.title = `${entry.description}${entry.stream ? ` · GDS ${entry.stream}` : ''}${entry.mask ? ` · Mask ${entry.mask} · ${entry.polarity}` : ''}`;
+        button.append(swatch, label, detail);
+        this.layerListEl.appendChild(button);
+      });
+    }
   }
 
   setActive(active) {
@@ -218,6 +402,8 @@ export class MaskLabPanel {
     if (this.dimensionReadoutEl) this.dimensionReadoutEl.textContent = `${summary.widthNm} nm × ${summary.heightNm} nm`;
     if (this.maskAreaEl) this.maskAreaEl.textContent = `${summary.widthNm} nm × ${summary.heightNm} nm`;
     if (this.maskCountEl) this.maskCountEl.textContent = String(summary.activePixels);
+    const activeLayer = this.getTechnology().layers.find(({ id }) => id === this.activeLayerId);
+    if (this.activeLayerEl) this.activeLayerEl.textContent = `${this.getTechnology().label} / ${activeLayer?.label || this.activeLayerId}`;
     if (this.maskPathEl) this.maskPathEl.textContent = this.name;
     if (this.maskSourceEl) this.maskSourceEl.textContent = this.sourceDesign ? this.sourceDesign.name : 'Manual';
     if (this.maskPowerStatusEl) this.maskPowerStatusEl.textContent = this.sourceDesign?.powerCheck?.ok ? 'Connected' :
@@ -235,6 +421,27 @@ export class MaskLabPanel {
   }
 
   bindEvents() {
+    this.technologyTabsEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-mask-technology]');
+      if (button) this.selectTechnology(button.dataset.maskTechnology);
+    });
+    this.technologyTabsEl.addEventListener('keydown', (event) => {
+      const current = event.target.closest('[data-mask-technology]');
+      if (!current) return;
+      const tabs = [...this.technologyTabsEl.querySelectorAll('[data-mask-technology]')];
+      const currentIndex = tabs.indexOf(current);
+      const nextIndex = event.key === 'ArrowRight' ? (currentIndex + 1) % tabs.length
+        : event.key === 'ArrowLeft' ? (currentIndex - 1 + tabs.length) % tabs.length
+          : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1;
+      if (nextIndex < 0) return;
+      event.preventDefault();
+      tabs[nextIndex].focus();
+      this.selectTechnology(tabs[nextIndex].dataset.maskTechnology);
+    });
+    this.layerListEl.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-mask-layer]');
+      if (button) this.selectLayer(button.dataset.maskLayer);
+    });
     this.el.addEventListener('click', (event) => {
       const cell = event.target.closest('.mask-cell');
       if (cell) {
@@ -352,9 +559,24 @@ export class MaskLabPanel {
   }
 
   resizeGrid(width, height = width) {
-    this.gridWidth = Math.max(8, Math.min(128, Number(width) || 64));
-    this.gridHeight = Math.max(8, Math.min(128, Number(height) || this.gridWidth));
-    this.mask = this.createMask(this.gridWidth, this.gridHeight);
+    this.syncProfileLayout();
+    const nextWidth = Math.max(8, Math.min(128, Number(width) || 64));
+    const nextHeight = Math.max(8, Math.min(128, Number(height) || nextWidth));
+    for (const layer of this.getTechnology().layers) {
+      const previousMask = this.layerMasks[layer.id];
+      const resizedMask = this.createMask(nextWidth, nextHeight);
+      for (let y = 0; y < Math.min(nextHeight, previousMask.length); y += 1) {
+        for (let x = 0; x < Math.min(nextWidth, previousMask[y].length); x += 1) {
+          resizedMask[y][x] = previousMask[y][x];
+        }
+      }
+      this.layerMasks[layer.id] = resizedMask;
+    }
+    this.gridWidth = nextWidth;
+    this.gridHeight = nextHeight;
+    this.mask = this.layerMasks[this.activeLayerId];
+    this.profileLayouts[this.technologyId].width = this.gridWidth;
+    this.profileLayouts[this.technologyId].height = this.gridHeight;
     this.sourceDesign = null;
     const sizeInput = this.el.querySelector('[data-mask-grid-size]');
     if (sizeInput && this.gridWidth === this.gridHeight) sizeInput.value = String(this.gridWidth);
@@ -397,7 +619,7 @@ export class MaskLabPanel {
 
   fillMask() {
     this.sourceDesign = null;
-    this.mask = this.createMask(this.gridWidth, this.gridHeight).map((row) => row.map(() => true));
+    this.setCurrentLayerMask(this.createMask(this.gridWidth, this.gridHeight).map((row) => row.map(() => true)));
     this.renderGrid();
     this.updateSummary();
     this.saveState();
@@ -405,7 +627,7 @@ export class MaskLabPanel {
 
   clearMask() {
     this.sourceDesign = null;
-    this.mask = this.createMask(this.gridWidth, this.gridHeight);
+    this.setCurrentLayerMask(this.createMask(this.gridWidth, this.gridHeight));
     this.renderGrid();
     this.updateSummary();
     this.saveState();
@@ -413,7 +635,7 @@ export class MaskLabPanel {
 
   invertMask() {
     this.sourceDesign = null;
-    this.mask = this.mask.map((row) => row.map((cell) => !cell));
+    this.setCurrentLayerMask(this.mask.map((row) => row.map((cell) => !cell)));
     this.renderGrid();
     this.updateSummary();
     this.saveState();
@@ -444,6 +666,10 @@ export class MaskLabPanel {
   }
 
   autoFillFromChipDesign() {
+    if (this.technologyId !== 'generic') {
+      this.setStatus('Chip Lab schematic rasterization is only available in the Educational profile; it does not generate a PDK layout.');
+      return false;
+    }
     if (this.trainingSessionSnapshot) {
       this.setStatus('Close the training challenge before replacing the mask from Chip Lab.');
       return false;
@@ -487,7 +713,7 @@ export class MaskLabPanel {
       x: Math.max(0, Math.min(this.gridWidth - 1, Math.round(offsetX + (point.x - minX) * scale))),
       y: Math.max(0, Math.min(this.gridHeight - 1, Math.round(offsetY + (point.y - minY) * scale)))
     });
-    this.mask = this.createMask(this.gridWidth, this.gridHeight);
+    this.setCurrentLayerMask(this.createMask(this.gridWidth, this.gridHeight));
 
     for (const { node, left, top, right, bottom } of geometry) {
       const a = project({ x: left, y: top });
@@ -578,6 +804,8 @@ export class MaskLabPanel {
     };
     const nameInput = this.el.querySelector('[data-mask-name]');
     if (nameInput) nameInput.value = this.name;
+    this.profileLayouts[this.technologyId].name = this.name;
+    this.profileLayouts[this.technologyId].sourceDesign = this.sourceDesign;
     this.renderGrid();
     this.updateSummary();
     const stateSaved = this.saveState();
@@ -620,13 +848,37 @@ export class MaskLabPanel {
   }
 
   exportMask() {
+    this.syncProfileLayout();
+    const profiles = Object.fromEntries(Object.entries(this.profileLayouts).map(([technologyId, layout]) => [
+      technologyId,
+      {
+        widthPx: layout.width,
+        heightPx: layout.height,
+        activeLayerId: layout.activeLayerId,
+        name: layout.name,
+        sourceDesign: layout.sourceDesign,
+        layers: Object.fromEntries(Object.entries(layout.layers).flatMap(([layerId, mask]) => {
+          const activeCells = [];
+          for (let y = 0; y < layout.height; y += 1) {
+            for (let x = 0; x < layout.width; x += 1) {
+              if (mask[y]?.[x]) activeCells.push(y * layout.width + x);
+            }
+          }
+          return activeCells.length ? [[layerId, activeCells]] : [];
+        }))
+      }
+    ]));
     return {
+      schemaVersion: 2,
+      technologyId: this.technologyId,
+      activeLayerId: this.activeLayerId,
       name: this.name,
       pixelSizeNm: this.pixelSizeNm,
       widthPx: this.gridWidth,
       heightPx: this.gridHeight,
       cells: this.mask.map((row) => row.map(Boolean)),
-      ...(this.sourceDesign ? { sourceDesign: this.sourceDesign } : {})
+      ...(this.sourceDesign ? { sourceDesign: this.sourceDesign } : {}),
+      profiles
     };
   }
 
@@ -671,6 +923,10 @@ export class MaskLabPanel {
   }
 
   openTraining() {
+    if (this.technologyId !== 'generic') {
+      this.setStatus('Pattern training is available only in the Educational profile.');
+      return;
+    }
     const modal = this.el.querySelector('[data-mask-learning-modal]');
     if (modal) modal.hidden = false;
     this.renderLearningPath();
@@ -822,26 +1078,80 @@ export class MaskLabPanel {
 
   importMask(data) {
     if (!data || typeof data !== 'object') return false;
-    const width = Number(data.widthPx) || Number(data.width) || 64;
-    const height = Number(data.heightPx) || Number(data.height) || width;
-    const cells = Array.isArray(data.cells) ? data.cells : Array.isArray(data.mask) ? data.mask : null;
-    if (!cells) return false;
-    const safeWidth = Math.max(8, Math.min(128, width));
-    const safeHeight = Math.max(8, Math.min(128, height));
-    this.gridWidth = safeWidth;
-    this.gridHeight = safeHeight;
-    this.mask = this.createMask(this.gridWidth, this.gridHeight);
-    for (let y = 0; y < safeHeight; y += 1) {
-      const row = Array.isArray(cells[y]) ? cells[y] : [];
-      for (let x = 0; x < safeWidth; x += 1) {
-        this.mask[y][x] = Boolean(row[x]);
+    if (data.profiles && typeof data.profiles === 'object') {
+      const restoredLayouts = this.createProfileLayouts(64, 64);
+      for (const technology of MASK_TECHNOLOGIES) {
+        const saved = data.profiles[technology.id];
+        if (!saved || typeof saved !== 'object') continue;
+        const width = Math.max(8, Math.min(128, Math.round(Number(saved.widthPx) || 64)));
+        const height = Math.max(8, Math.min(128, Math.round(Number(saved.heightPx) || width)));
+        const layout = {
+          width,
+          height,
+          activeLayerId: technology.layers.some(({ id }) => id === saved.activeLayerId)
+            ? saved.activeLayerId : technology.layers[0].id,
+          name: typeof saved.name === 'string' && saved.name.trim() ? saved.name.trim() : 'MaskLab',
+          sourceDesign: saved.sourceDesign && typeof saved.sourceDesign === 'object' ? saved.sourceDesign : null,
+          layers: Object.fromEntries(technology.layers.map(({ id }) => [id, this.createMask(width, height)]))
+        };
+        for (const [layerId, activeIndices] of Object.entries(saved.layers || {})) {
+          const target = layout.layers[layerId];
+          if (!target || !Array.isArray(activeIndices)) continue;
+          for (const index of activeIndices) {
+            if (!Number.isInteger(index) || index < 0 || index >= width * height) continue;
+            target[Math.floor(index / width)][index % width] = true;
+          }
+        }
+        restoredLayouts[technology.id] = layout;
       }
+      this.profileLayouts = restoredLayouts;
+      this.technologyId = MASK_TECHNOLOGIES.some(({ id }) => id === data.technologyId)
+        ? data.technologyId : DEFAULT_MASK_TECHNOLOGY_ID;
+      const layout = this.profileLayouts[this.technologyId];
+      this.gridWidth = layout.width;
+      this.gridHeight = layout.height;
+      this.layerMasks = layout.layers;
+      this.activeLayerId = MASK_TECHNOLOGIES.find(({ id }) => id === this.technologyId)
+        .layers.some(({ id }) => id === data.activeLayerId) ? data.activeLayerId : layout.activeLayerId;
+      this.mask = this.layerMasks[this.activeLayerId];
+      this.name = layout.name;
+      this.sourceDesign = layout.sourceDesign;
+    } else {
+      const width = Number(data.widthPx) || Number(data.width) || 64;
+      const height = Number(data.heightPx) || Number(data.height) || width;
+      const cells = Array.isArray(data.cells) ? data.cells : Array.isArray(data.mask) ? data.mask : null;
+      if (!cells) return false;
+      this.technologyId = DEFAULT_MASK_TECHNOLOGY_ID;
+      const safeWidth = Math.max(8, Math.min(128, Math.round(width)));
+      const safeHeight = Math.max(8, Math.min(128, Math.round(height)));
+      this.gridWidth = safeWidth;
+      this.gridHeight = safeHeight;
+      const technology = this.getTechnology();
+      this.layerMasks = Object.fromEntries(technology.layers.map(({ id }) => [id, this.createMask(safeWidth, safeHeight)]));
+      this.activeLayerId = technology.layers[0].id;
+      this.mask = this.layerMasks[this.activeLayerId];
+      for (let y = 0; y < safeHeight; y += 1) {
+        const row = Array.isArray(cells[y]) ? cells[y] : [];
+        for (let x = 0; x < safeWidth; x += 1) {
+          this.mask[y][x] = Boolean(row[x]);
+        }
+      }
+      this.name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : this.name;
+      this.sourceDesign = data.sourceDesign && typeof data.sourceDesign === 'object' ? data.sourceDesign : null;
+      this.profileLayouts[this.technologyId] = {
+        width: this.gridWidth,
+        height: this.gridHeight,
+        activeLayerId: this.activeLayerId,
+        name: this.name,
+        sourceDesign: this.sourceDesign,
+        layers: this.layerMasks
+      };
     }
-    this.name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : this.name;
-    this.sourceDesign = data.sourceDesign && typeof data.sourceDesign === 'object' ? data.sourceDesign : null;
-    if (this.el?.querySelector('[data-mask-name]')) {
-      this.el.querySelector('[data-mask-name]').value = this.name;
-    }
+    const nameInput = this.el?.querySelector('[data-mask-name]');
+    if (nameInput) nameInput.value = this.name;
+    const sizeInput = this.el?.querySelector('[data-mask-grid-size]');
+    if (sizeInput) sizeInput.value = String(this.gridWidth);
+    this.renderTechnologyProfile();
     this.renderGrid();
     this.updateSummary();
     this.saveState();
@@ -850,6 +1160,10 @@ export class MaskLabPanel {
 
   renderGrid() {
     if (!this.gridEl) return;
+    const technology = this.getTechnology();
+    const activeLayer = technology.layers.find(({ id }) => id === this.activeLayerId);
+    this.gridEl.style.setProperty('--mask-layer-color', activeLayer?.color || '#7aa2ff');
+    this.gridEl.setAttribute('aria-label', `${technology.name}, ${activeLayer?.label || 'drawing'} layer. Use arrow keys to move and Enter or Space to paint.`);
     this.gridEl.style.gridTemplateColumns = `repeat(${this.gridWidth}, minmax(0, 1fr))`;
     this.gridEl.style.gridTemplateRows = `repeat(${this.gridHeight}, minmax(0, 1fr))`;
     const cellCount = this.gridWidth * this.gridHeight;
