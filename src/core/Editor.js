@@ -31,6 +31,7 @@ import { ShortcutsModal } from '../ui/ShortcutsModal.js';
 import { CodeEditorPanel } from '../ui/CodeEditorPanel.js';
 import { BoardPanel } from '../ui/BoardPanel.js';
 import { ChipLabPanel } from '../ui/ChipLabPanel.js';
+import { MaskLabPanel } from '../ui/MaskLabPanel.js';
 
 export class Editor {
   constructor(rootContainer) {
@@ -49,20 +50,23 @@ export class Editor {
     this.codeEditorPanel = new CodeEditorPanel(this);
     this.boardPanel = new BoardPanel(this);
     this.chipLabPanel = new ChipLabPanel(this);
+    this.maskLabPanel = new MaskLabPanel(this);
+    this.root.appendChild(this.maskLabPanel.el);
     this.bindGlobalEvents();
     this.startLoop();
   }
 
   setWorkspaceMode(mode) {
-    if (!['atoms', 'circuits', 'chips'].includes(mode) || this.workspaceMode === mode) return;
+    if (!['atoms', 'circuits', 'chips', 'masks'].includes(mode) || this.workspaceMode === mode) return;
     this.setCircuitToolMode?.(null);
     this.workspaceMode = mode;
     this.sceneManager.updateWorkspaceBackground();
     this.root.classList.toggle('circuit-workspace', mode === 'circuits');
     this.root.classList.toggle('chip-workspace', mode === 'chips');
+    this.root.classList.toggle('mask-workspace', mode === 'masks');
     this.topHeader?.updateWorkspaceMode(mode);
     this.addMenuModal?.setWorkspaceMode(mode);
-    if (mode === 'circuits' || mode === 'chips') {
+    if (mode === 'circuits' || mode === 'chips' || mode === 'masks') {
       this.addMenuModal?.close();
       this.compoundMenuModal?.close();
       this.electronFieldMenuModal?.close();
@@ -70,6 +74,7 @@ export class Editor {
     }
     const circuitMode = mode === 'circuits';
     const chipMode = mode === 'chips';
+    const maskMode = mode === 'masks';
     if (circuitMode) {
       // Clear previously placed MOS logic gates and their attached connections.
       for (const object of [...this.sceneManager.objectsList]) {
@@ -99,12 +104,12 @@ export class Editor {
       this.selectionManager.clearSelection();
     }
     for (const object of this.sceneManager.objectsList) {
-      object.visible = chipMode ? false : circuitMode ? Boolean(object.userData?.circuitComponent) : !object.userData?.circuitComponent;
+      object.visible = maskMode ? false : chipMode ? false : circuitMode ? Boolean(object.userData?.circuitComponent) : !object.userData?.circuitComponent;
     }
-    this.sceneManager.gridHelper.visible = !chipMode;
-    this.sceneManager.axisLineX.visible = !circuitMode && !chipMode;
-    this.sceneManager.axisLineY.visible = !circuitMode && !chipMode;
-    this.sceneManager.cursorGroup.visible = !circuitMode && !chipMode;
+    this.sceneManager.gridHelper.visible = !chipMode && !maskMode;
+    this.sceneManager.axisLineX.visible = !circuitMode && !chipMode && !maskMode;
+    this.sceneManager.axisLineY.visible = !circuitMode && !chipMode && !maskMode;
+    this.sceneManager.cursorGroup.visible = !circuitMode && !chipMode && !maskMode;
     if (circuitMode) {
       const camera = this.sceneManager.activeCamera;
       camera.position.set(0, 24, 0);
@@ -127,6 +132,7 @@ export class Editor {
     const dockMode = this.circuitDock.querySelector('select');
     if (dockMode) dockMode.value = mode;
     this.chipLabPanel?.setActive(chipMode);
+    this.maskLabPanel?.setActive(maskMode);
     this.updateHUDText();
     requestAnimationFrame(() => {
       this.sceneManager.onResize();

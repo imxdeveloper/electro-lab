@@ -112,6 +112,7 @@ export class TopHeader {
             <option value="atoms">Atom Lab</option>
             <option value="circuits">Circuit Lab</option>
             <option value="chips">Chip Lab</option>
+            <option value="masks">Mask Lab</option>
           </select>
         </div>
         <!-- Mode Switcher -->

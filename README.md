@@ -19,6 +19,18 @@ A browser-based 3D workspace for exploring atoms and molecules, building circuit
 
 ---
 
+## 🧩 Mask Lab
+
+Mask Lab adds a 10 nm × 10 nm pixel-resolution drafting workspace for custom lithography masks.
+
+- Open the workspace selector and choose **Mask Lab**.
+- Draw and erase individual pixels on a square grid.
+- Each pixel represents a 10 nm square, so a 64 × 64 mask covers 640 nm × 640 nm.
+- Export the current mask as JSON for reuse or downstream tooling.
+- Use **Training** for four guided exercises: a single feature, a parallel line pair, a square frame, and a 4 × 4 array. Exact mask checks, hints, scores, and completion progress are saved in the browser. Training preserves and restores the mask you were editing.
+
+---
+
 ## 🖱️ Navigation: Emulate 3-Button Mouse
 
 As requested, **Emulate 3 Button Mouse** is enabled by default:

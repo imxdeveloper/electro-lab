@@ -1,0 +1,145 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { MaskLabPanel, MASK_LESSONS } from '../src/ui/MaskLabPanel.js';
+
+const createPanel = (width = 16, height = 16) => {
+  const panel = Object.create(MaskLabPanel.prototype);
+  panel.pixelSizeNm = 10;
+  panel.gridWidth = width;
+  panel.gridHeight = height;
+  panel.name = 'MaskLab';
+  panel.el = { querySelector: () => null };
+  panel.brushMode = 'draw';
+  panel.mask = panel.createMask(width, height);
+  panel.learningProgress = [];
+  panel.learningStats = {};
+  panel.learningLessonIndex = 0;
+  panel.learningHintCount = 0;
+  panel.learningResult = '';
+  panel.activeTrainingLessonId = null;
+  panel.learningPassed = false;
+  panel.trainingSessionSnapshot = null;
+  panel.saveLearningProgress = () => {};
+  panel.saveLearningStats = () => {};
+  panel.renderLearningPath = () => {};
+  return panel;
+};
+
+test('mask panel reports 10nm pixel dimensions and total cell count', () => {
+  const panel = createPanel(64, 64);
+  const summary = panel.getSummary();
+
+  assert.equal(summary.widthNm, 640);
+  assert.equal(summary.heightNm, 640);
+  assert.equal(summary.totalPixels, 4096);
+  assert.equal(summary.activePixels, 0);
+});
+
+test('mask drawing, clear, fill, and invert update the grid state', () => {
+  const panel = createPanel(8, 8);
+  panel.paintCellAt(0, 0, true);
+  panel.paintCellAt(1, 1, true);
+
+  assert.equal(panel.mask[0][0], true);
+  assert.equal(panel.mask[1][1], true);
+
+  panel.invertMask();
+  assert.equal(panel.mask[0][0], false);
+  assert.equal(panel.mask[1][1], false);
+
+  panel.fillMask();
+  assert.equal(panel.mask.flat().every(Boolean), true);
+
+  panel.clearMask();
+  assert.equal(panel.mask.flat().every((value) => value === false), true);
+});
+
+test('export and import preserve the mask layout and dimensions', () => {
+  const original = createPanel(12, 10);
+  original.paintCellAt(2, 3, true);
+  original.paintCellAt(9, 8, true);
+
+  const payload = original.exportMask();
+  const restored = createPanel(12, 10);
+  const imported = restored.importMask(payload);
+  const summary = restored.getSummary();
+
+  assert.equal(imported, true);
+  assert.equal(restored.gridWidth, 12);
+  assert.equal(restored.gridHeight, 10);
+  assert.equal(summary.activePixels, 2);
+  assert.equal(restored.mask[3][2], true);
+  assert.equal(restored.mask[8][9], true);
+});
+
+test('training lessons match their stated geometry and pitch', () => {
+  const [single, linePair, frame, array] = MASK_LESSONS;
+
+  assert.deepEqual(single.cells, [[32, 32]]);
+  assert.equal(linePair.cells.length, 10);
+  assert.equal(new Set(linePair.cells.map(([, y]) => y)).size, 2);
+  assert.equal(Math.abs(linePair.cells[5][1] - linePair.cells[0][1]), 3);
+  assert.equal(frame.cells.length, 20);
+  assert.equal(array.cells.length, 16);
+  assert.equal(new Set(array.cells.map(([x]) => x)).size, 4);
+  assert.equal(new Set(array.cells.map(([, y]) => y)).size, 4);
+  assert.equal(array.cells[1][0] - array.cells[0][0], 2);
+});
+
+test('training checks reject extra pixels and wrong grid dimensions', () => {
+  const panel = createPanel(64, 64);
+  const lesson = MASK_LESSONS[0];
+  panel.paintCellAt(32, 32, true);
+  panel.paintCellAt(33, 32, true);
+
+  assert.equal(panel.evaluateTrainingMask(lesson).matches, false);
+  assert.equal(panel.evaluateTrainingMask(lesson).extras.length, 1);
+
+  panel.mask[32][33] = false;
+  panel.gridWidth = 32;
+  assert.equal(panel.evaluateTrainingMask(lesson).matches, false);
+});
+
+test('training challenge restores the user mask, name, and dimensions when exited', () => {
+  const panel = createPanel(12, 10);
+  panel.name = 'My mask';
+  panel.paintCellAt(3, 4, true);
+  panel.trainingSessionSnapshot = panel.exportMask();
+
+  panel.resizeGrid(64, 64);
+  panel.name = 'Mask training';
+  panel.mask[32][32] = true;
+  panel.restoreTrainingSession();
+
+  assert.equal(panel.gridWidth, 12);
+  assert.equal(panel.gridHeight, 10);
+  assert.equal(panel.name, 'My mask');
+  assert.equal(panel.mask[4][3], true);
+  assert.equal(panel.mask[32], undefined);
+});
+
+test('checking a training challenge requires the exact target mask', () => {
+  const panel = createPanel(64, 64);
+  panel.activeTrainingLessonId = MASK_LESSONS[0].id;
+  panel.mask[32][32] = true;
+  panel.mask[31][32] = true;
+
+  panel.checkTrainingLesson();
+
+  assert.equal(panel.learningPassed, false);
+  assert.deepEqual(panel.learningProgress, []);
+  assert.match(panel.learningResult, /1 extra/);
+});
+
+test('passing a training challenge unlocks next lesson without changing the mask', () => {
+  const panel = createPanel(64, 64);
+  panel.activeTrainingLessonId = MASK_LESSONS[0].id;
+  panel.mask[32][32] = true;
+
+  panel.checkTrainingLesson();
+
+  assert.equal(panel.learningPassed, true);
+  assert.deepEqual(panel.learningProgress, [MASK_LESSONS[0].id]);
+  assert.equal(panel.learningStats[MASK_LESSONS[0].id].bestScore, 100);
+  assert.equal(panel.mask[32][32], true);
+});
