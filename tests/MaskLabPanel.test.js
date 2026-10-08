@@ -143,3 +143,36 @@ test('passing a training challenge unlocks next lesson without changing the mask
   assert.equal(panel.learningStats[MASK_LESSONS[0].id].bestScore, 100);
   assert.equal(panel.mask[32][32], true);
 });
+
+test('auto-fill rasterizes a Chip Lab layout and retains the power check metadata', () => {
+  const panel = createPanel(64, 64);
+  panel.editor = {
+    chipLabPanel: {
+      chipName: 'Powered inverter',
+      nodes: [
+        { id: 'vcc', type: 'VPLUS', label: 'V+', x: 0, y: 0 },
+        { id: 'gate', type: 'AND', label: 'AND gate', x: 250, y: 120 },
+        { id: 'gnd', type: 'GROUND', label: 'GND', x: 0, y: 240 },
+        { id: 'out', type: 'OUTPUT', label: 'Y', x: 500, y: 120 }
+      ],
+      wires: [
+        { from: 'vcc', output: 0, to: 'gate', input: 0, route: 'orthogonal' },
+        { from: 'gnd', output: 0, to: 'gate', input: 1, route: 'curved' },
+        { from: 'gate', output: 0, to: 'out', input: 0, route: 'straight' }
+      ],
+      nodeHeight: () => 72,
+      portPosition: (node, direction) => ({
+        x: direction === 'out' ? node.x + 150 : node.x,
+        y: node.y + 36
+      }),
+      inspectPowerRails: () => ({ ok: true, connectedVPlus: 1, totalVPlus: 1, connectedGround: 1, totalGround: 1, shortedPins: [], issues: [] })
+    }
+  };
+
+  assert.equal(panel.autoFillFromChipDesign(), true);
+  assert.ok(panel.mask.flat().some(Boolean));
+  assert.equal(panel.name, 'Powered inverter mask');
+  assert.equal(panel.sourceDesign.componentCount, 4);
+  assert.equal(panel.sourceDesign.wireCount, 3);
+  assert.equal(panel.exportMask().sourceDesign.powerCheck.ok, true);
+});

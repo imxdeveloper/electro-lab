@@ -127,6 +127,12 @@ export class ChipLabPanel {
             <button data-chip-add="CONST"><i class="chip-io-icon">0/1</i><span><b>Logic constant</b><small>Choose LOW or HIGH</small></span><kbd>+</kbd></button>
           </div>
           <div class="chip-library-group">
+            <h3>Logic power rails</h3>
+            <button data-chip-add="VPLUS"><i class="chip-io-icon output">V+</i><span><b>V+ logic-high rail</b><small>Fixed HIGH / 1 source</small></span><kbd>+</kbd></button>
+            <button data-chip-add="GROUND"><i class="chip-io-icon">GND</i><span><b>GND logic-low rail</b><small>Fixed LOW / 0 source</small></span><kbd>+</kbd></button>
+            <button type="button" data-chip-action="check-power-rails">Check V+ / GND wiring</button>
+          </div>
+          <div class="chip-library-group">
             <h3>Logic gates</h3>
             ${['AND', 'OR', 'NOT', 'XOR', 'NAND', 'NOR', 'XNOR', 'BUF'].map((gate) => `<button data-chip-add="${gate}"><i class="chip-gate-icon">${gate}</i><span><b>${gate} gate</b><small>${GATES[gate].description}</small></span><kbd>+</kbd></button>`).join('')}
           </div>
@@ -623,6 +629,7 @@ export class ChipLabPanel {
         ? `Circuit checks complete · ${diagnostics.length} item${diagnostics.length === 1 ? '' : 's'} to review.`
         : 'Circuit checks complete · no issues found.');
     }
+    if (action === 'check-power-rails') this.checkPowerRails();
     if (action === 'delete-selected-wire' && this.selectedWireIndex !== null) this.deleteWire(this.selectedWireIndex);
     if (action === 'toggle-wire-probe' && this.selectedWireIndex !== null) {
       const wire = this.wires[this.selectedWireIndex];
@@ -1203,7 +1210,7 @@ export class ChipLabPanel {
 
   addNode(type, position) {
     const customChip = this.customChips.find((chip) => chip.id === type);
-    const componentType = ['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST'].includes(type) ||
+    const componentType = ['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND'].includes(type) ||
       GATES[type] || customChip ? type : null;
     if (!componentType) return;
     this.commitHistory();
@@ -1212,11 +1219,11 @@ export class ChipLabPanel {
     const node = {
       id: `u${++this.nodeSequence}`,
       type: componentType,
-      label: `${type === 'INPUT' ? 'Input' : type === 'OUTPUT' ? 'Output' : type === 'CLOCK' ? 'Clock' : customChip?.name || type} ${siblings + 1}`,
+      label: `${type === 'INPUT' ? 'Input' : type === 'OUTPUT' ? 'Output' : type === 'CLOCK' ? 'Clock' : type === 'VPLUS' ? 'V+' : type === 'GROUND' ? 'GND' : customChip?.name || type} ${siblings + 1}`,
       x: position?.x ?? 100 + (placement % 4) * 240,
       y: position?.y ?? 100 + Math.floor(placement / 4) * 130,
-      value: BUS_INPUT_TYPES.has(componentType) || componentType === 'BUS_CONST' ? 0 :
-        componentType === 'CONST' ? false : false,
+      value: componentType === 'VPLUS' ? true :
+        BUS_INPUT_TYPES.has(componentType) || componentType === 'BUS_CONST' ? 0 : false,
       q: false,
       width: BUS_TYPES.has(componentType) ? componentType === 'DECODER' ? 2 : 4 : undefined,
       memory: componentType === 'RAM' ? Array(4).fill(0) : undefined,
@@ -1420,7 +1427,7 @@ export class ChipLabPanel {
         Array.isArray(chip.components) && chip.components.every((node) =>
           node && typeof node.id === 'string' && typeof node.type === 'string' && typeof node.label === 'string' &&
           Number.isFinite(node.x) && Number.isFinite(node.y) &&
-          (['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST'].includes(node.type) ||
+          (['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND'].includes(node.type) ||
             Object.hasOwn(GATES, node.type) || node.type === 'CUSTOM' && valid(node.definition, depth + 1)) &&
           (!BUS_TYPES.has(node.type) ||
             BUS_WIDTHS.includes(node.width || 4))
@@ -1450,7 +1457,7 @@ export class ChipLabPanel {
           typeof node.label !== 'string' || !Number.isFinite(node.x) || !Number.isFinite(node.y)) return false;
       componentIds.add(node.id);
       if (!(node.type === 'INPUT' || node.type === 'OUTPUT' || node.type === 'CLOCK' ||
-          node.type === 'BUS_INPUT' || node.type === 'BUS_OUTPUT' || node.type === 'SPLITTER' || node.type === 'JOINER' || node.type === 'CONST' || node.type === 'BUS_CONST' ||
+          node.type === 'BUS_INPUT' || node.type === 'BUS_OUTPUT' || node.type === 'SPLITTER' || node.type === 'JOINER' || node.type === 'CONST' || node.type === 'BUS_CONST' || node.type === 'VPLUS' || node.type === 'GROUND' ||
           Object.hasOwn(GATES, node.type) ||
           node.type === 'CUSTOM' && this.validateCustomDefinition(node.definition, depth + 1, budget))) return false;
       if (BUS_TYPES.has(node.type) &&
@@ -2418,11 +2425,16 @@ export class ChipLabPanel {
   }
 
   evaluate(values = new Map(this.nodes.filter((node) =>
-    node.type === 'INPUT' || node.type === 'BUS_INPUT' || node.type === 'CLOCK' || node.type === 'CONST' || node.type === 'BUS_CONST'
-  ).map((node) => [node.id, node.value])), nodes = this.nodes, wires = this.wires, depth = 0) {
+    node.type === 'INPUT' || node.type === 'BUS_INPUT' || node.type === 'CLOCK' || node.type === 'CONST' || node.type === 'BUS_CONST' ||
+    node.type === 'VPLUS' || node.type === 'GROUND'
+  ).map((node) => [node.id, node.type === 'VPLUS' ? true : node.type === 'GROUND' ? false : node.value])), nodes = this.nodes, wires = this.wires, depth = 0) {
     const outputs = new Map(values);
+    for (const node of nodes) {
+      if (node.type === 'VPLUS') outputs.set(node.id, true);
+      if (node.type === 'GROUND') outputs.set(node.id, false);
+    }
     const unresolved = new Set(nodes.filter((node) =>
-      !['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST', 'CLOCK'].includes(node.type) && !SEQUENTIAL_TYPES.has(node.type)
+      !['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST', 'CLOCK', 'VPLUS', 'GROUND'].includes(node.type) && !SEQUENTIAL_TYPES.has(node.type)
     ).map((node) => node.id));
     for (const node of nodes) {
       if (SEQUENTIAL_TYPES.has(node.type)) outputs.set(node.id, Boolean(node.q));
@@ -2433,7 +2445,7 @@ export class ChipLabPanel {
       for (const node of nodes) {
         if (!unresolved.has(node.id)) continue;
         const inputCount = this.inputCount(node);
-        if (!inputCount) continue;
+        if (!inputCount && node.type !== 'CUSTOM') continue;
         const sources = [];
         let ready = true;
         for (let pin = 0; pin < inputCount; pin += 1) {
@@ -2540,7 +2552,8 @@ export class ChipLabPanel {
 
   portPosition(node, direction, index) {
     const height = this.nodeHeight(node);
-    if (node.type === 'INPUT' || node.type === 'BUS_INPUT' || node.type === 'CONST' || node.type === 'BUS_CONST') return { x: node.x + 150, y: node.y + height / 2 };
+    if (node.type === 'INPUT' || node.type === 'BUS_INPUT' || node.type === 'CONST' || node.type === 'BUS_CONST' ||
+        node.type === 'VPLUS' || node.type === 'GROUND') return { x: node.x + 150, y: node.y + height / 2 };
     if (node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT') return { x: node.x, y: node.y + height / 2 };
     if (direction === 'in') return { x: node.x, y: node.y + 34 + index * 24 };
     const count = this.outputCount(node);
@@ -2549,7 +2562,8 @@ export class ChipLabPanel {
 
   nodeHeight(node) {
     if (node.type === 'INPUT' || node.type === 'OUTPUT' || node.type === 'BUS_INPUT' || node.type === 'BUS_OUTPUT' ||
-        node.type === 'BUS_CONST' || node.type === 'CONST' || node.type === 'CLOCK') return 72;
+        node.type === 'BUS_CONST' || node.type === 'CONST' || node.type === 'CLOCK' ||
+        node.type === 'VPLUS' || node.type === 'GROUND') return 72;
     if (node.type === 'DFF' || node.type === 'SR_DFF') return 110;
     return Math.max(82, 48 + Math.max(this.inputCount(node), this.outputCount(node), 1) * 24);
   }
@@ -2582,7 +2596,9 @@ export class ChipLabPanel {
       const header = node.type === 'INPUT' ? 'INPUT PIN' : node.type === 'OUTPUT' ? 'OUTPUT PIN' :
         node.type === 'BUS_INPUT' ? `${node.width}-BIT BUS INPUT` : node.type === 'BUS_OUTPUT' ? `${node.width}-BIT BUS OUTPUT` :
         node.type === 'CONST' ? 'LOGIC CONSTANT' : node.type === 'BUS_CONST' ? `${node.width}-BIT CONSTANT` :
-        node.type === 'CLOCK' ? 'CLOCK SOURCE' : node.type === 'CUSTOM' ? `CUSTOM CHIP · ${node.definition?.inputs?.length || 0}×${node.definition?.outputs?.length || 0}` :
+        node.type === 'CLOCK' ? 'CLOCK SOURCE' : node.type === 'VPLUS' ? 'V+ · LOGIC HIGH' :
+        node.type === 'GROUND' ? 'GND · LOGIC LOW' :
+        node.type === 'CUSTOM' ? `CUSTOM CHIP · ${node.definition?.inputs?.length || 0}×${node.definition?.outputs?.length || 0}` :
           `${node.type} · ${this.inputCount(node)}-INPUT`;
       const inputPorts = this.inputCount(node);
       const inputPins = Array.from({ length: inputPorts }, (_, index) => {
@@ -2604,6 +2620,7 @@ export class ChipLabPanel {
       const outputPorts = Array.from({ length: this.outputCount(node) }, (_, index) => {
         const p = this.portPosition(node, 'out', index);
         const label = node.type === 'CUSTOM' ? node.definition.outputs[index]?.label :
+          node.type === 'VPLUS' ? 'V+ / HIGH' : node.type === 'GROUND' ? 'GND / LOW' :
           node.type === 'ADDER' ? ['SUM', 'COUT'][index] :
             node.type === 'COMPARATOR' ? ['GT', 'EQ', 'LT'][index] :
               node.type === 'DECODER' ? `Y${index}` :
@@ -2627,6 +2644,66 @@ export class ChipLabPanel {
     }).join('');
     this.el.querySelector('[data-chip-empty]').hidden = this.nodes.length > 0;
     this.el.querySelector('[data-chip-count]').textContent = `${this.nodes.length} components · ${this.wires.length} nets`;
+  }
+
+  inspectPowerRails() {
+    const supplies = {
+      VPLUS: this.nodes.filter((node) => node.type === 'VPLUS'),
+      GROUND: this.nodes.filter((node) => node.type === 'GROUND')
+    };
+    const connected = Object.fromEntries(Object.entries(supplies).map(([type, nodes]) => [
+      type,
+      nodes.filter((node) => this.wires.some((wire) => wire.from === node.id && wire.output === 0)).length
+    ]));
+    const issues = [];
+    for (const type of ['VPLUS', 'GROUND']) {
+      if (!supplies[type].length) issues.push(`No ${type === 'VPLUS' ? 'V+' : 'GND'} rail terminal is placed.`);
+      for (const node of supplies[type]) {
+        if (!this.wires.some((wire) => wire.from === node.id && wire.output === 0)) {
+          issues.push(`${node.label} has no outgoing rail connection.`);
+        }
+      }
+    }
+    const drivenPins = new Map();
+    for (const type of ['VPLUS', 'GROUND']) {
+      for (const node of supplies[type]) {
+        for (const wire of this.wires.filter((entry) => entry.from === node.id && entry.output === 0)) {
+          const key = `${wire.to}:${wire.input}`;
+          const existing = drivenPins.get(key) || new Set();
+          existing.add(type);
+          drivenPins.set(key, existing);
+        }
+      }
+    }
+    const shortedPins = [];
+    for (const [key, drivers] of drivenPins) {
+      if (drivers.has('VPLUS') && drivers.has('GROUND')) {
+        const [targetId, input] = key.split(':');
+        const target = this.nodes.find((node) => node.id === targetId);
+        shortedPins.push({ targetId, input: Number(input), label: target?.label || targetId });
+        issues.push(`V+ and GND both drive ${target?.label || targetId} input ${Number(input) + 1}.`);
+      }
+    }
+    return {
+      ok: supplies.VPLUS.length > 0 && supplies.GROUND.length > 0 &&
+        connected.VPLUS === supplies.VPLUS.length && connected.GROUND === supplies.GROUND.length &&
+        shortedPins.length === 0,
+      connectedVPlus: connected.VPLUS,
+      totalVPlus: supplies.VPLUS.length,
+      connectedGround: connected.GROUND,
+      totalGround: supplies.GROUND.length,
+      shortedPins,
+      issues
+    };
+  }
+
+  checkPowerRails() {
+    const result = this.inspectPowerRails();
+    const summary = result.ok
+      ? `V+ ${result.connectedVPlus}/${result.totalVPlus}, GND ${result.connectedGround}/${result.totalGround}; no shared input detected.`
+      : result.issues.join(' ');
+    this.setStatus(`Logic-rail check: ${summary} This checks schematic wiring only, not physical voltage, current, or PCB safety.`);
+    return result;
   }
 
   analyzeDesign() {
@@ -2953,6 +3030,7 @@ export class ChipLabPanel {
     const output = this.outputCount(node);
     const componentDescription = node.type === 'INPUT' || node.type === 'OUTPUT' || node.type === 'CLOCK'
       ? node.type === 'CLOCK' ? 'Manual clock source' : 'Chip I/O pin'
+      : node.type === 'VPLUS' || node.type === 'GROUND' ? 'Fixed logic rail source'
       : node.type === 'CUSTOM' ? 'Reusable logic subcircuit'
         : BUS_TYPES.has(node.type) ? `${node.width || 4}-bit component`
           : `${inputs}-input logic component`;
@@ -2979,7 +3057,9 @@ export class ChipLabPanel {
                   : node.type === 'CLOCK' ? 'Use Pulse clock in the Simulation tab to produce a rising edge for connected D flip-flops.'
                     : node.type === 'INPUT' ? 'Click the component switch or this button to change the driven binary input.'
                       : node.type === 'OUTPUT' ? 'Connect one logic signal to this output pin to monitor its value.'
-                        : GATES[node.type].description;
+                        : node.type === 'VPLUS' ? 'Fixed HIGH / 1 source for digital logic. This is not a physical voltage supply.'
+                          : node.type === 'GROUND' ? 'Fixed LOW / 0 source for digital logic. This is not a physical ground model.'
+                            : GATES[node.type]?.description || 'Digital logic component.';
     const logicState = node.type === 'DFF' || node.type === 'SR_DFF'
       ? `Q = ${node.q ? 'HIGH · 1' : 'LOW · 0'}`
       : typeof node.simulatedValue === 'number'
@@ -3323,7 +3403,7 @@ export class ChipLabPanel {
   }
 
   exportVerilog() {
-    const allowed = new Set(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'CONST', 'BUS_CONST',
+    const allowed = new Set(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND',
       'AND', 'OR', 'NOT', 'XOR', 'NAND', 'NOR', 'XNOR', 'BUF',
       'BUS_AND', 'BUS_OR', 'BUS_XOR', 'BUS_NOT', 'MUX', 'ADDER', 'COMPARATOR']);
     const unsupported = this.nodes.filter((node) => !allowed.has(node.type));
@@ -3364,9 +3444,10 @@ export class ChipLabPanel {
     };
     for (const node of this.nodes) {
       if (node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT') continue;
-      if (node.type === 'CONST' || node.type === 'BUS_CONST') {
-        const width = node.type === 'CONST' ? 1 : node.width;
-        nets.set(node.id, [`${width}'b${Number(node.value).toString(2).padStart(width, '0')}`]);
+      if (node.type === 'CONST' || node.type === 'BUS_CONST' || node.type === 'VPLUS' || node.type === 'GROUND') {
+        const width = node.type === 'BUS_CONST' ? node.width : 1;
+        const value = node.type === 'VPLUS' ? 1 : node.type === 'GROUND' ? 0 : Number(node.value);
+        nets.set(node.id, [`${width}'b${value.toString(2).padStart(width, '0')}`]);
         continue;
       }
       if (inputs.includes(node)) continue;
@@ -3627,7 +3708,7 @@ export class ChipLabPanel {
       const ids = new Set();
       const components = data.components.map((node) => {
         if (!node || typeof node.id !== 'string' || ids.has(node.id) ||
-            !(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST'].includes(node.type) || node.type === 'CUSTOM' && node.definition || Object.hasOwn(GATES, node.type)) ||
+            !(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'SPLITTER', 'JOINER', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND'].includes(node.type) || node.type === 'CUSTOM' && node.definition || Object.hasOwn(GATES, node.type)) ||
             typeof node.label !== 'string' || !Number.isFinite(node.x) || !Number.isFinite(node.y)) {
           throw new Error('The design contains an invalid component.');
         }

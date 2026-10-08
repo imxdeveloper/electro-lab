@@ -57,6 +57,7 @@ export class MaskLabPanel {
     this.gridWidth = 64;
     this.gridHeight = 64;
     this.name = 'MaskLab';
+    this.sourceDesign = null;
     this.brushMode = 'draw';
     this.isDrawing = false;
     this.mask = this.createMask(this.gridWidth, this.gridHeight);
@@ -84,6 +85,7 @@ export class MaskLabPanel {
         <label class="mask-name-label">MASK NAME<input data-mask-name maxlength="48" value="MaskLab" aria-label="Mask name"></label>
         <div class="mask-top-actions">
           <button type="button" data-mask-action="open-training">Training</button>
+          <button type="button" data-mask-action="auto-fill-chip">Auto-fill from Chip Lab</button>
           <button type="button" data-mask-action="clear">Clear</button>
           <button type="button" data-mask-action="fill">Fill</button>
           <button type="button" data-mask-action="invert">Invert</button>
@@ -116,6 +118,7 @@ export class MaskLabPanel {
           <div class="mask-focus-bar">
             <div class="mask-summary" data-mask-summary>0 / 4096 pixels lit</div>
             <div class="mask-path" data-mask-path>MaskLab</div>
+            <div class="mask-status" data-mask-status role="status" aria-live="polite"></div>
           </div>
           <div class="mask-grid-shell">
             <div class="mask-grid" data-mask-grid aria-label="Mask editor grid"></div>
@@ -129,6 +132,8 @@ export class MaskLabPanel {
             <div class="mask-info-row"><span>Cells active</span><strong data-mask-count>0</strong></div>
           </div>
           <div class="mask-control-group">
+            <div class="mask-info-row"><span>Source</span><strong data-mask-source>Manual</strong></div>
+            <div class="mask-info-row"><span>Power wiring</span><strong data-mask-power-status>Not checked</strong></div>
             <div class="mask-info-row"><span>File</span><strong>JSON export</strong></div>
             <div class="mask-info-row"><span>Storage</span><strong>local browser</strong></div>
           </div>
@@ -164,6 +169,9 @@ export class MaskLabPanel {
     this.maskAreaEl = this.el.querySelector('[data-mask-area]');
     this.maskCountEl = this.el.querySelector('[data-mask-count]');
     this.maskPathEl = this.el.querySelector('[data-mask-path]');
+    this.maskSourceEl = this.el.querySelector('[data-mask-source]');
+    this.maskPowerStatusEl = this.el.querySelector('[data-mask-power-status]');
+    this.statusEl = this.el.querySelector('[data-mask-status]');
 
     this.loadState();
     this.bindEvents();
@@ -206,6 +214,9 @@ export class MaskLabPanel {
     if (this.maskAreaEl) this.maskAreaEl.textContent = `${summary.widthNm} nm × ${summary.heightNm} nm`;
     if (this.maskCountEl) this.maskCountEl.textContent = String(summary.activePixels);
     if (this.maskPathEl) this.maskPathEl.textContent = this.name;
+    if (this.maskSourceEl) this.maskSourceEl.textContent = this.sourceDesign ? this.sourceDesign.name : 'Manual';
+    if (this.maskPowerStatusEl) this.maskPowerStatusEl.textContent = this.sourceDesign?.powerCheck?.ok ? 'Connected' :
+      this.sourceDesign?.powerCheck ? 'Review wiring' : 'Not checked';
   }
 
   bindEvents() {
@@ -217,6 +228,7 @@ export class MaskLabPanel {
       if (action === 'fill') this.fillMask();
       if (action === 'invert') this.invertMask();
       if (action === 'export') this.exportMaskFile();
+      if (action === 'auto-fill-chip') this.autoFillFromChipDesign();
     });
 
     this.el.querySelector('[data-mask-grid-size]').addEventListener('input', (event) => {
@@ -334,6 +346,152 @@ export class MaskLabPanel {
     this.saveState();
   }
 
+  traceDesignLine(x0, y0, x1, y1) {
+    if (![x0, y0, x1, y1].every(Number.isFinite)) return;
+    let x = x0;
+    let y = y0;
+    const dx = Math.abs(x1 - x0);
+    const sx = x0 < x1 ? 1 : -1;
+    const dy = -Math.abs(y1 - y0);
+    const sy = y0 < y1 ? 1 : -1;
+    let error = dx + dy;
+    while (true) {
+      if (x >= 0 && y >= 0 && x < this.gridWidth && y < this.gridHeight) this.mask[y][x] = true;
+      if (x === x1 && y === y1) break;
+      const doubled = 2 * error;
+      if (doubled >= dy) {
+        error += dy;
+        x += sx;
+      }
+      if (doubled <= dx) {
+        error += dx;
+        y += sy;
+      }
+    }
+  }
+
+  autoFillFromChipDesign() {
+    if (this.trainingSessionSnapshot) {
+      this.setStatus('Close the training challenge before replacing the mask from Chip Lab.');
+      return false;
+    }
+    const chipLab = this.editor?.chipLabPanel;
+    if (!chipLab || !Array.isArray(chipLab.nodes) || !chipLab.nodes.length) {
+      this.setStatus('Open Chip Lab and create or load a design before using Auto-fill.');
+      return false;
+    }
+    const nodes = chipLab.nodes.filter((node) =>
+      node && Number.isFinite(node.x) && Number.isFinite(node.y) && typeof node.id === 'string'
+    );
+    const wires = Array.isArray(chipLab.wires) ? chipLab.wires : [];
+    if (!nodes.length) {
+      this.setStatus('The Chip Lab design has no components with valid layout positions.');
+      return false;
+    }
+    const geometry = nodes.map((node) => ({
+      node,
+      left: node.x,
+      top: node.y,
+      right: node.x + 150,
+      bottom: node.y + (chipLab.nodeHeight?.(node) || 72)
+    }));
+    const minX = Math.min(...geometry.map(({ left }) => left));
+    const maxX = Math.max(...geometry.map(({ right }) => right));
+    const minY = Math.min(...geometry.map(({ top }) => top));
+    const maxY = Math.max(...geometry.map(({ bottom }) => bottom));
+    const margin = Math.min(4, Math.floor(Math.min(this.gridWidth, this.gridHeight) / 4));
+    const availableWidth = Math.max(1, this.gridWidth - margin * 2 - 1);
+    const availableHeight = Math.max(1, this.gridHeight - margin * 2 - 1);
+    const scale = Math.min(
+      availableWidth / Math.max(1, maxX - minX),
+      availableHeight / Math.max(1, maxY - minY)
+    );
+    const renderedWidth = (maxX - minX) * scale;
+    const renderedHeight = (maxY - minY) * scale;
+    const offsetX = Math.round((this.gridWidth - 1 - renderedWidth) / 2);
+    const offsetY = Math.round((this.gridHeight - 1 - renderedHeight) / 2);
+    const project = (point) => ({
+      x: Math.max(0, Math.min(this.gridWidth - 1, Math.round(offsetX + (point.x - minX) * scale))),
+      y: Math.max(0, Math.min(this.gridHeight - 1, Math.round(offsetY + (point.y - minY) * scale)))
+    });
+    this.mask = this.createMask(this.gridWidth, this.gridHeight);
+
+    for (const { node, left, top, right, bottom } of geometry) {
+      const a = project({ x: left, y: top });
+      const b = project({ x: right, y: bottom });
+      this.traceDesignLine(a.x, a.y, b.x, a.y);
+      this.traceDesignLine(b.x, a.y, b.x, b.y);
+      this.traceDesignLine(b.x, b.y, a.x, b.y);
+      this.traceDesignLine(a.x, b.y, a.x, a.y);
+      const center = project({ x: (left + right) / 2, y: (top + bottom) / 2 });
+      this.mask[center.y][center.x] = true;
+      if (node.type === 'VPLUS') {
+        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y);
+        this.traceDesignLine(center.x, center.y - 1, center.x, center.y + 1);
+      } else if (node.type === 'GROUND') {
+        this.traceDesignLine(center.x - 1, center.y - 1, center.x + 1, center.y - 1);
+        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y);
+        this.traceDesignLine(center.x - 1, center.y + 1, center.x + 1, center.y + 1);
+      }
+    }
+
+    const positions = new Map(nodes.map((node) => [node.id, node]));
+    for (const wire of wires) {
+      const source = positions.get(wire.from);
+      const target = positions.get(wire.to);
+      if (!source || !target) continue;
+      const start = chipLab.portPosition?.(source, 'out', wire.output) || { x: source.x + 150, y: source.y + 36 };
+      const end = chipLab.portPosition?.(target, 'in', wire.input) || { x: target.x, y: target.y + 36 };
+      const points = [];
+      if (wire.route === 'orthogonal') {
+        const bendX = (start.x + end.x) / 2;
+        points.push(start, { x: bendX, y: start.y }, { x: bendX, y: end.y }, end);
+      } else if (wire.route === 'straight') {
+        points.push(start, end);
+      } else {
+        const bend = Math.max(50, Math.abs(end.x - start.x) * 0.45);
+        const control1 = { x: start.x + bend, y: start.y };
+        const control2 = { x: end.x - bend, y: end.y };
+        for (let step = 0; step <= 24; step += 1) {
+          const t = step / 24;
+          const inverse = 1 - t;
+          points.push({
+            x: inverse ** 3 * start.x + 3 * inverse ** 2 * t * control1.x + 3 * inverse * t ** 2 * control2.x + t ** 3 * end.x,
+            y: inverse ** 3 * start.y + 3 * inverse ** 2 * t * control1.y + 3 * inverse * t ** 2 * control2.y + t ** 3 * end.y
+          });
+        }
+      }
+      for (let index = 1; index < points.length; index += 1) {
+        const a = project(points[index - 1]);
+        const b = project(points[index]);
+        this.traceDesignLine(a.x, a.y, b.x, b.y);
+      }
+    }
+
+    const powerCheck = chipLab.inspectPowerRails?.() || null;
+    this.name = `${chipLab.chipName || 'Chip Lab'} mask`;
+    this.sourceDesign = {
+      name: chipLab.chipName || 'Chip Lab design',
+      componentCount: nodes.length,
+      wireCount: wires.length,
+      generatedAt: new Date().toISOString(),
+      powerCheck
+    };
+    const nameInput = this.el.querySelector('[data-mask-name]');
+    if (nameInput) nameInput.value = this.name;
+    this.renderGrid();
+    this.updateSummary();
+    this.saveState();
+    this.setStatus(powerCheck?.ok
+      ? `Auto-filled a schematic mask from ${nodes.length} components and ${wires.length} wires. V+ and GND logic rails are connected.`
+      : `Auto-filled a schematic mask from ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck?.issues.join(' ') || 'power rails are not configured.'}`);
+    return true;
+  }
+
+  setStatus(message) {
+    if (this.statusEl) this.statusEl.textContent = message;
+  }
+
   saveState() {
     if (typeof localStorage === 'undefined' || this.trainingSessionSnapshot) return;
     try {
@@ -362,7 +520,8 @@ export class MaskLabPanel {
       pixelSizeNm: this.pixelSizeNm,
       widthPx: this.gridWidth,
       heightPx: this.gridHeight,
-      cells: this.mask.map((row) => row.map(Boolean))
+      cells: this.mask.map((row) => row.map(Boolean)),
+      ...(this.sourceDesign ? { sourceDesign: this.sourceDesign } : {})
     };
   }
 
@@ -572,6 +731,7 @@ export class MaskLabPanel {
       }
     }
     this.name = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : this.name;
+    this.sourceDesign = data.sourceDesign && typeof data.sourceDesign === 'object' ? data.sourceDesign : null;
     if (this.el?.querySelector('[data-mask-name]')) {
       this.el.querySelector('[data-mask-name]').value = this.name;
     }

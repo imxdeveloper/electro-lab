@@ -28,6 +28,54 @@ test('multi-bit XOR preserves width and propagates the binary result', () => {
   assert.equal(panel.evaluate().outputs.get('out'), 8);
 });
 
+test('V+ and GND rails drive fixed logic levels and report missing wiring', () => {
+  const nodes = [
+    { id: 'vcc', type: 'VPLUS', label: 'V+', x: 0, y: 0 },
+    { id: 'gnd', type: 'GROUND', label: 'GND', x: 0, y: 100 },
+    { id: 'and', type: 'AND', label: 'AND', x: 200, y: 40 },
+    { id: 'out', type: 'OUTPUT', label: 'Y', x: 400, y: 40 }
+  ];
+  const panel = createPanel(nodes, [
+    { from: 'vcc', output: 0, to: 'and', input: 0 },
+    { from: 'gnd', output: 0, to: 'and', input: 1 },
+    { from: 'and', output: 0, to: 'out', input: 0 }
+  ]);
+
+  assert.equal(panel.evaluate().outputs.get('vcc'), true);
+  assert.equal(panel.evaluate().outputs.get('gnd'), false);
+  assert.equal(panel.evaluate().outputs.get('out'), false);
+  assert.deepEqual(panel.inspectPowerRails(), {
+    ok: true,
+    connectedVPlus: 1,
+    totalVPlus: 1,
+    connectedGround: 1,
+    totalGround: 1,
+    shortedPins: [],
+    issues: []
+  });
+});
+
+test('V+ and GND checker detects an unconnected rail and conflicting drivers on one pin', () => {
+  const nodes = [
+    { id: 'vcc', type: 'VPLUS', label: 'V+', x: 0, y: 0 },
+    { id: 'gnd', type: 'GROUND', label: 'GND', x: 0, y: 100 },
+    { id: 'and', type: 'AND', label: 'AND', x: 200, y: 40 }
+  ];
+  const disconnected = createPanel(nodes, [
+    { from: 'vcc', output: 0, to: 'and', input: 0 }
+  ]).inspectPowerRails();
+  assert.equal(disconnected.ok, false);
+  assert.match(disconnected.issues.join(' '), /GND has no outgoing rail connection/);
+
+  const shorted = createPanel(nodes, [
+    { from: 'vcc', output: 0, to: 'and', input: 0 },
+    { from: 'gnd', output: 0, to: 'and', input: 0 }
+  ]).inspectPowerRails();
+  assert.equal(shorted.ok, false);
+  assert.equal(shorted.shortedPins.length, 1);
+  assert.match(shorted.issues.join(' '), /V\+ and GND both drive AND input 1/);
+});
+
 test('splitter and joiner round-trip a bus with B0 as the least-significant bit', () => {
   const nodes = [
     { id: 'input', type: 'BUS_INPUT', width: 4, value: 10 },
@@ -110,6 +158,33 @@ test('nested reusable chips evaluate their internal logic recursively', () => {
 
   assert.equal(panel.validateCustomDefinition(outer), true);
   assert.equal(panel.evaluate().outputs.get('sink'), true);
+});
+
+test('nested reusable chips evaluate internal V+ and GND logic sources', () => {
+  const definition = {
+    id: 'rail-chip',
+    name: 'Rail inverter',
+    inputs: [],
+    outputs: [{ id: 'result', label: 'Y' }],
+    components: [
+      { id: 'vcc', type: 'VPLUS', label: 'V+', x: 0, y: 0 },
+      { id: 'invert', type: 'NOT', label: 'NOT', x: 150, y: 0 },
+      { id: 'result', type: 'OUTPUT', label: 'Y', x: 300, y: 0 }
+    ],
+    wires: [
+      { from: 'vcc', output: 0, to: 'invert', input: 0 },
+      { from: 'invert', output: 0, to: 'result', input: 0 }
+    ]
+  };
+  const panel = createPanel([
+    { id: 'custom', type: 'CUSTOM', definition },
+    { id: 'sink', type: 'OUTPUT' }
+  ], [
+    { from: 'custom', output: 0, to: 'sink', input: 0 }
+  ]);
+
+  assert.equal(panel.validateCustomDefinition(definition), true);
+  assert.equal(panel.evaluate().outputs.get('sink'), false);
 });
 
 test('mux, adder, comparator, and decoder expose correctly indexed output ports', () => {

@@ -145,15 +145,15 @@ button, input, select {
   overflow: hidden; background: #0d121a; color: #e0e8f1; font-size: 12px;
 }
 .mask-lab[hidden] { display: none; }
-.mask-topbar { display: flex; align-items: center; gap: 24px; min-height: 58px; padding: 0 22px; border-bottom: 1px solid #293547; background: #151d29; }
-.mask-brand { display: flex; align-items: center; gap: 10px; min-width: 210px; }
+.mask-topbar { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 0 16px; border-bottom: 1px solid #293547; background: #151d29; }
+.mask-brand { display: flex; align-items: center; gap: 10px; min-width: 190px; }
 .mask-brand > div { display: grid; gap: 3px; }
 .mask-brand strong { font-size: 14px; letter-spacing: .02em; }
 .mask-brand small { color: #8494a9; font-size: 10px; }
 .mask-brand-mark { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid #638bff; border-radius: 8px; background: linear-gradient(145deg, #293d6a, #172338); color: #dfe8ff; font: 700 12px var(--font-mono); }
 .mask-name-label { display: grid; gap: 3px; color: #8494a9; font: 600 9px var(--font-mono); letter-spacing: .08em; }
-.mask-name-label input { width: 240px; padding: 4px 0; border-bottom: 1px solid #35445a; background: transparent; color: #e8eff8; font-size: 13px; user-select: text; }
-.mask-top-actions { display: flex; gap: 7px; margin-left: auto; }
+.mask-name-label input { width: 180px; padding: 4px 0; border-bottom: 1px solid #35445a; background: transparent; color: #e8eff8; font-size: 13px; user-select: text; }
+.mask-top-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 5px; margin-left: auto; }
 .mask-top-actions button, .mask-brush { padding: 7px 11px; border: 1px solid #35445a; border-radius: 5px; background: #202b3a; color: #c7d3e3; cursor: pointer; }
 .mask-top-actions button:hover, .mask-brush:hover { background: #2a3b52; border-color: #53719b; }
 .mask-top-actions button:disabled, .mask-brush:disabled { opacity: .55; cursor: not-allowed; }
@@ -165,6 +165,7 @@ button, input, select {
 .mask-editor-panel { display: flex; flex-direction: column; min-height: 0; background: #111821; }
 .mask-focus-bar { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; padding: 12px 16px; border-bottom: 1px solid #293547; background: rgba(19, 27, 38, 0.82); }
 .mask-summary, .mask-path { color: #b8c4d7; font-size: 11px; }
+.mask-status { max-width: 52%; color: #9fb5d0; font-size: 10px; line-height: 1.4; text-align: right; }
 .mask-grid-shell { display: flex; align-items: center; justify-content: center; flex: 1; min-height: 0; padding: 18px; }
 .mask-grid {
   display: grid; width: min(68vmin, 620px); height: min(68vmin, 620px); aspect-ratio: 1 / 1;
@@ -286,6 +287,8 @@ button, input, select {
 .chip-node.dff .chip-node-header { fill: #654733; }
 .chip-node.clock .chip-node-header { fill: #705124; }
 .chip-node.custom .chip-node-header { fill: #245744; }
+.chip-node.vplus .chip-node-header { fill: #805c20; }
+.chip-node.ground .chip-node-header { fill: #3d5264; }
 .chip-node.selected .chip-node-body { stroke: #6da9ff; stroke-width: 2; filter: drop-shadow(0 0 6px #327be477); }
 .chip-node.selected .chip-node-header { fill: #31517b; }
 .chip-node-header-square { fill: inherit; }

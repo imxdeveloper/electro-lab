@@ -26,6 +26,9 @@ Mask Lab adds a 10 nm × 10 nm pixel-resolution drafting workspace for custom li
 - Open the workspace selector and choose **Mask Lab**.
 - Draw and erase individual pixels on a square grid.
 - Each pixel represents a 10 nm square, so a 64 × 64 mask covers 640 nm × 640 nm.
+- **Auto-fill from Chip Lab** rasterizes the current schematic's component outlines and routed connections onto the mask grid and records the source design with the export.
+- Chip Lab includes fixed V+ (logic HIGH) and GND (logic LOW) source terminals, with a wiring check for missing rails and both sources driving the same input.
+- V+ / GND checks are digital-schematic checks only; they do not model voltage, current, physical copper continuity, or electrical safety. The auto-filled mask is a schematic raster preview, not a fabrication-ready chip layout.
 - Export the current mask as JSON for reuse or downstream tooling.
 - Use **Training** for four guided exercises: a single feature, a parallel line pair, a square frame, and a 4 × 4 array. Exact mask checks, hints, scores, and completion progress are saved in the browser. Training preserves and restores the mask you were editing.
 
