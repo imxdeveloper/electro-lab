@@ -103,8 +103,10 @@ test('buildGdsModel extrudes boundaries and paths into one mesh per layer', () =
   assert.equal(summary.structures, 1);
   assert.equal(summary.skippedReferences, 1);
   assert.equal(summary.skippedLabels, 1);
-  assert.ok(Math.abs(summary.widthMicrons - 50) < 0.01);
-  assert.ok(Math.abs(summary.heightMicrons - 60) < 0.01);
+  // The extent covers drawn geometry only. The array reference's placement points
+  // are not drawn here, so they no longer inflate the reported size.
+  assert.ok(Math.abs(summary.widthMicrons - 40) < 0.01);
+  assert.ok(Math.abs(summary.heightMicrons - 50) < 0.01);
   assert.ok(Math.abs(summary.databaseUnitNm - 1) < 0.001);
   assert.equal(summary.truncated, 0);
 
@@ -192,7 +194,7 @@ test('buildGdsModel warns when the declared database unit is implausible', () =>
   const { summary } = buildGdsModel(parsed);
 
   assert.equal(summary.unitsPlausible, false);
-  assert.equal(summary.widthMicrons, 0.00005);
-  assert.equal(summary.widthDbUnits, 50000);
+  assert.equal(summary.widthMicrons, 0.00004);
+  assert.equal(summary.widthDbUnits, 40000);
   assert.ok(summary.warnings.some((warning) => /database unit/.test(warning)));
 });

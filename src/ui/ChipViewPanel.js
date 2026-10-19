@@ -86,6 +86,13 @@ export class ChipViewPanel {
     });
 
     this.modelList.addEventListener('change', (event) => {
+      const annotationToggle = event.target.closest('[data-chipview-annotation]');
+      if (annotationToggle) {
+        const model = this.modelFromEvent(event);
+        if (!model) return;
+        this.setAnnotations(model, annotationToggle.dataset.chipviewAnnotation, annotationToggle.checked);
+        return;
+      }
       const gapInput = event.target.closest('[data-chipview-gap]');
       if (!gapInput) return;
       const model = this.modelFromEvent(event);
@@ -96,6 +103,27 @@ export class ChipViewPanel {
       gapInput.value = String(model.stack.gap);
       this.applyStack(model);
     });
+  }
+
+  /** Show or hide the annotations that came out of the GDS: layer names, cell
+   *  names, and the extracted transistor markers. */
+  setAnnotations(model, kind, visible) {
+    model.object.traverse((node) => {
+      if (kind === 'gates' && node.userData.chipViewGate) node.visible = visible;
+      if (kind === 'labels') {
+        if (node.userData.chipViewLabel === 'layer' || node.userData.chipViewLabel === 'cell') node.visible = visible;
+      }
+    });
+    if (kind === 'gates' && visible && model.stack.stacked) {
+      // Lift the markers onto the top of the current stack so they stay visible.
+      const top = model.object.children
+        .filter((child) => child.userData.chipViewStackIndex !== undefined)
+        .reduce((max, child) => Math.max(max, child.position.y + child.scale.y), 0);
+      model.object.traverse((node) => {
+        if (node.userData.chipViewGate) node.position.y = top + 0.12;
+      });
+    }
+    this.editor.sceneManager.render();
   }
 
   modelFromEvent(event) {
@@ -184,15 +212,42 @@ export class ChipViewPanel {
         ? `${summary.widthMicrons.toFixed(1)} × ${summary.heightMicrons.toFixed(1)} µm`
         : `${summary.widthDbUnits.toLocaleString()} × ${summary.heightDbUnits.toLocaleString()} db units`;
       const warnings = [...summary.warnings];
+      if (summary.pdk === 'unknown') {
+        const unnamed = summary.layerNames.filter((entry) => entry.startsWith('Layer ')).length;
+        warnings.push(
+          `This layout's PDK is not recognised, so ${unnamed} of its ${summary.layers} layers keep their numbers. ` +
+          'Add that PDK\'s .lyp and re-run scripts/generate-layer-map.mjs to name them.'
+        );
+      }
       if (summary.truncated) {
         warnings.push(`Only the first ${summary.polygons.toLocaleString()} drawable elements are rendered; ${summary.truncated.toLocaleString()} more were skipped.`);
+      }
+      if (summary.skippedMarkerLayers?.length) {
+        const list = (reason) => summary.skippedMarkerLayers
+          .filter((entry) => entry.reason === reason)
+          .map((entry) => `${entry.layer} (${entry.shapes.toLocaleString()} shapes)`)
+          .join(', ');
+        const markers = list('cell marker');
+        const labels = list('label artwork');
+        const parts = [];
+        if (markers) parts.push(`Cell markers not drawn: ${markers}. These are per-cell technology flags; their positions were verified to sit on the cells that own them.`);
+        if (labels) parts.push(`Label artwork not drawn: ${labels}. Labels annotate the metal beneath them and were verified to lie inside the die.`);
+        warnings.push(parts.join(' '));
+      }
+      if (summary.transistors?.supported) {
+        warnings.push(`${summary.transistors.total.toLocaleString()} transistors extracted: ${summary.transistors.nChannel} n-channel and ${summary.transistors.pChannel} p-channel across ${summary.cellInstances} placed cells.`);
+      } else if (summary.transistors?.reason && summary.transistors.deviceFamilyKnown) {
+        // Only explain the absence of devices when the PDK is one we recognise,
+        // so unknown technologies are not lectured about.
+        warnings.push(summary.transistors.reason);
       }
       this.addModel({
         name: file.name.replace(/\.[^/.]+$/, ''),
         format: summary.format,
         object: group,
-        detail: `${summary.layers} layer(s) · ${shapeText} · ${sizeText}`,
+        detail: `${summary.pdk && summary.pdk !== 'unknown' ? summary.pdk : 'PDK not recognised'} · ${summary.layers} layer(s) · ${shapeText} · ${sizeText}`,
         stack: { stacked: true, gap: summary.stackGap ?? DEFAULT_STACK_GAP },
+        summary,
         warnings
       });
       this.setStatus(`${file.name} imported for viewing.`);
@@ -251,7 +306,7 @@ export class ChipViewPanel {
     }
   }
 
-  addModel({ name, format, object, detail, urls = [], stack = { stacked: true, gap: DEFAULT_STACK_GAP }, warnings = [] }) {
+  addModel({ name, format, object, detail, urls = [], stack = { stacked: true, gap: DEFAULT_STACK_GAP }, summary = null, warnings = [] }) {
     object.userData.chipViewModel = true;
     object.traverse((node) => {
       node.userData.chipViewModel = true;
@@ -261,7 +316,7 @@ export class ChipViewPanel {
       }
     });
 
-    const model = { id: this.nextId++, name, format, object, detail, urls, stack, warnings };
+    const model = { id: this.nextId++, name, format, object, detail, urls, stack, summary, warnings };
     this.models.push(model);
     this.editor.sceneManager.addObject(object);
     this.renderModels();
@@ -331,12 +386,13 @@ export class ChipViewPanel {
       const layerList = layers.map(({ mesh, layer, datatype }) => {
         const coverage = mesh.userData.chipViewCoverage ?? 0;
         const fullArea = mesh.userData.chipViewFullArea;
+        const layerName = mesh.userData.chipViewLayerName ?? `Layer ${layer}/${datatype}`;
         const swatch = `#${mesh.material.color.getHexString()}`;
         return `
           <button type="button" class="chip-view-layer" data-chipview-layer="${mesh.name}"
-                  aria-pressed="${mesh.visible}" title="${layer}/${datatype} · ${mesh.userData.chipViewElements} elements · ${Math.min(coverage * 100, 999).toFixed(0)}% of the drawing${fullArea ? ' · full-area fill or plate' : ''}">
+                  aria-pressed="${mesh.visible}" title="${layerName} (${layer}/${datatype}) · ${mesh.userData.chipViewElements} elements · ${Math.min(coverage * 100, 999).toFixed(0)}% of the drawing${fullArea ? ' · full-area fill or plate' : ''}">
             <span class="chip-view-layer-swatch" style="background:${swatch}"></span>
-            <span>${layer}/${datatype}</span>
+            <span>${layerName}</span>
             ${fullArea ? '<em>fill</em>' : ''}
           </button>`;
       }).join('');
@@ -360,6 +416,15 @@ export class ChipViewPanel {
               Gap
               <input type="number" data-chipview-gap value="${model.stack.gap}" min="0.05" max="3" step="0.05" aria-label="Layer stack gap">
             </label>
+            <label>
+              <input type="checkbox" data-chipview-annotation="labels">
+              Names
+            </label>
+            ${model.summary?.transistors?.supported ? `
+            <label title="${model.summary.transistors.nChannel} n-channel, ${model.summary.transistors.pChannel} p-channel">
+              <input type="checkbox" data-chipview-annotation="gates">
+              Gates (${model.summary.transistors.total})
+            </label>` : ''}
           </div>` : ''}
         ${layers.length > 1 ? `
           <details class="chip-view-layers" ${layers.some((entry) => entry.mesh.userData.chipViewFullArea) ? 'open' : ''}>

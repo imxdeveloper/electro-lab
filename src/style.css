@@ -653,7 +653,7 @@ button, input, select {
 .chip-view-model-actions button:hover { background: #2b4663; }
 .chip-view-layers { grid-column: 1 / -1; margin-top: 2px; border-top: 1px solid #2a3849; padding-top: 7px; }
 .chip-view-layers > summary { cursor: pointer; color: #a9c8e4; font-size: 10.5px; }
-.chip-view-stack { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; margin: 7px 0 0; color: #9eacc0; font-size: 10.5px; }
+.chip-view-stack { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 7px 0 0; color: #9eacc0; font-size: 10.5px; }
 .chip-view-stack label { display: flex; gap: 5px; align-items: center; }
 .chip-view-stack input[type="number"] { width: 60px; padding: 3px 5px; border: 1px solid #344358; border-radius: 4px; background: #111a26; color: #edf4ff; font-size: 10.5px; }
 .chip-view-stack input[type="checkbox"] { accent-color: #4b916d; }

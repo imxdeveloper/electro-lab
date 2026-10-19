@@ -27,6 +27,9 @@ export const GDSRecordTables = {
     COLROW: 0x30,
     TEXTNODE: 0x31,
     NODE: 0x32,
+    STRANS: 0x37,
+    MAG: 0x38,
+    ANGLE: 0x39,
     STRING: 0x36
   },
   legacy: {
@@ -45,6 +48,9 @@ export const GDSRecordTables = {
     COLROW: 0x13,
     TEXTNODE: 0x14,
     NODE: 0x15,
+    STRANS: 0x1a,
+    MAG: 0x1b,
+    ANGLE: 0x1c,
     STRING: 0x19
   }
 };
@@ -205,9 +211,15 @@ export function parseGdsii(input) {
   };
 
   const startElement = (type) => {
-    finishElement();
-    if (currentStructure) currentElement = { type, layer: 0, datatype: 0, points: [], width: 0 };
-  };
+      finishElement();
+      if (currentStructure) {
+        currentElement = {
+          type, layer: 0, datatype: 0, points: [], width: 0,
+          // Reference placement: bit 15 of STRANS mirrors about the Y axis.
+          strans: 0, mag: 1, angle: 0, referencePoint: null
+        };
+      }
+    };
 
   while (offset + 4 <= bytes.byteLength) {
     const length = view.getUint16(offset, false);
@@ -266,6 +278,12 @@ export function parseGdsii(input) {
       }
     } else if (currentElement && recordType === table.SNAME && dataType === DATA_TYPES.ASCII) {
       currentElement.sname = readAscii(view, dataStart, dataLength);
+    } else if (currentElement && recordType === table.STRANS && dataType === DATA_TYPES.BIT_ARRAY && dataLength >= 2) {
+      currentElement.strans = view.getUint16(dataStart, false);
+    } else if (currentElement && recordType === table.MAG && dataType === DATA_TYPES.REAL_8) {
+      currentElement.mag = readGdsReal8(view, dataStart);
+    } else if (currentElement && recordType === table.ANGLE && dataType === DATA_TYPES.REAL_8) {
+      currentElement.angle = readGdsReal8(view, dataStart);
     } else if (currentElement && recordType === table.STRING && dataType === DATA_TYPES.ASCII) {
       currentElement.string = readAscii(view, dataStart, dataLength);
     } else if (currentElement && recordType === table.COLROW && dataType === DATA_TYPES.INT_2 && dataLength >= 4) {
@@ -306,4 +324,175 @@ export function parseGdsii(input) {
   result.boundingBox = Number.isFinite(box.minX) ? box : null;
 
   return result;
+}
+
+// 2x3 affine transform, [a, b, c, d, e, f]: x' = a*x + c*y + e, y' = b*x + d*y + f
+export const IDENTITY_TRANSFORM = [1, 0, 0, 1, 0, 0];
+
+export function multiplyTransforms(parent, child) {
+  return [
+    parent[0] * child[0] + parent[2] * child[1],
+    parent[1] * child[0] + parent[3] * child[1],
+    parent[0] * child[2] + parent[2] * child[3],
+    parent[1] * child[2] + parent[3] * child[3],
+    parent[0] * child[4] + parent[2] * child[5] + parent[4],
+    parent[1] * child[4] + parent[3] * child[5] + parent[5]
+  ];
+}
+
+export function applyTransform(transform, x, y) {
+  return [
+    transform[0] * x + transform[2] * y + transform[4],
+    transform[1] * x + transform[3] * y + transform[5]
+  ];
+}
+
+function referenceTransform(element, originX = 0, originY = 0, arrayOffsetX = 0, arrayOffsetY = 0) {
+  const mag = Number.isFinite(element.mag) && element.mag > 0 ? element.mag : 1;
+  const angle = ((Number.isFinite(element.angle) ? element.angle : 0) % 360) * Math.PI / 180;
+  const mirrored = ((element.strans ?? 0) & 0x8000) !== 0;
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  // GDS placement order: magnify, mirror about the Y axis, rotate, translate.
+  const scaleX = mirrored ? -mag : mag;
+  return multiplyTransforms([1, 0, 0, 1, originX + arrayOffsetX, originY + arrayOffsetY], [
+    cos * scaleX, sin * scaleX, -sin * mag, cos * mag, 0, 0
+  ]);
+}
+
+/** Axis-aligned extent of a structure's own geometry. */
+export function structureBounds(structure) {
+  const box = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  for (const element of structure.elements) {
+    for (const [x, y] of element.points) {
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      box.minX = Math.min(box.minX, x);
+      box.minY = Math.min(box.minY, y);
+      box.maxX = Math.max(box.maxX, x);
+      box.maxY = Math.max(box.maxY, y);
+    }
+  }
+  return box;
+}
+
+/**
+ * Pick the layout's top structure: the one nothing else references, falling
+ * back to the largest structure in the library.
+ */
+export function findTopStructure(parsed) {
+  const referenced = new Set();
+  for (const structure of parsed.structures) {
+    for (const element of structure.elements) {
+      if ((element.type === 'SREF' || element.type === 'AREF') && element.sname) referenced.add(element.sname);
+    }
+  }
+  const roots = parsed.structures.filter((structure) => !referenced.has(structure.name));
+  const pool = roots.length ? roots : parsed.structures;
+  return pool.reduce((best, structure) => (
+    structure.elements.length > (best?.elements.length ?? -1) ? structure : best
+  ), null);
+}
+
+/**
+ * Expand the cell hierarchy into one flat element list in top-cell coordinates,
+ * following SREF and AREF placement. Without this, every sub-cell would be
+ * drawn at its own local origin and the layout would look like one stacked blob.
+ *
+ * @returns {{ elements: object[], instances: object[], texts: object[], truncatedAt: number|null }}
+ */
+export function flattenStructure(parsed, topName = null, options = {}) {
+  const maxInstances = options.maxInstances ?? 20000;
+  const byName = new Map(parsed.structures.map((structure) => [structure.name, structure]));
+  const top = topName ? byName.get(topName) : findTopStructure(parsed);
+  if (!top) return { elements: [], instances: [], texts: [], topName: null, truncatedAt: null };
+
+  const elements = [];
+  const instances = [];
+  const texts = [];
+  const queue = [{ structure: top, transform: IDENTITY_TRANSFORM, path: top.name, instanceId: null, chain: [top.name] }];
+  const boundsCache = new Map();
+  let truncatedAt = null;
+
+  const pushElement = (element, transform, path, instanceId) => {
+    const moved = {
+      ...element,
+      points: element.points.map(([x, y]) => applyTransform(transform, x, y)),
+      structure: path,
+      instanceId
+    };
+    if (element.type === 'TEXT') texts.push(moved);
+    else elements.push(moved);
+  };
+
+  while (queue.length) {
+    const { structure, transform, path, instanceId, chain } = queue.shift();
+
+    for (const element of structure.elements) {
+      if (element.type === 'SREF' || element.type === 'AREF') {
+        const child = byName.get(element.sname);
+        // Skip only genuine cycles; the same cell placed many times is normal.
+        if (!child || chain.includes(child.name)) continue;
+        const origin = element.points[0] ?? [0, 0];
+        const placements = element.type === 'AREF' ? arrayPlacements(element) : [[0, 0]];
+        for (const [offsetX, offsetY] of placements) {
+          if (instances.length >= maxInstances) {
+            truncatedAt = instances.length;
+            break;
+          }
+          const childTransform = referenceTransform(element, origin[0], origin[1], offsetX, offsetY);
+          const centre = applyTransform(childTransform, 0, 0);
+          const localBounds = boundsCache.get(child.name) ?? structureBounds(child);
+          boundsCache.set(child.name, localBounds);
+          const corners = [
+            applyTransform(childTransform, localBounds.minX, localBounds.minY),
+            applyTransform(childTransform, localBounds.maxX, localBounds.minY),
+            applyTransform(childTransform, localBounds.maxX, localBounds.maxY),
+            applyTransform(childTransform, localBounds.minX, localBounds.maxY)
+          ].filter(([, y]) => Number.isFinite(y));
+          const id = instances.length;
+          instances.push({
+            id,
+            name: child.name,
+            parent: path,
+            mirrored: ((element.strans ?? 0) & 0x8000) !== 0,
+            angle: element.angle ?? 0,
+            mag: element.mag ?? 1,
+            x: centre[0],
+            y: centre[1],
+            box: corners.length ? {
+              minX: Math.min(...corners.map((point) => point[0])),
+              maxX: Math.max(...corners.map((point) => point[0])),
+              minY: Math.min(...corners.map((point) => point[1])),
+              maxY: Math.max(...corners.map((point) => point[1]))
+            } : null,
+            transform: childTransform
+          });
+          queue.push({ structure: child, transform: childTransform, path: child.name, instanceId: id, chain: [...chain, child.name] });
+        }
+        if (truncatedAt !== null) break;
+      } else if (element.points.length) {
+        pushElement(element, transform, path, instanceId);
+      }
+    }
+    if (truncatedAt !== null) break;
+  }
+
+  return { elements, instances, texts, topName: top.name, truncatedAt };
+}
+
+function arrayPlacements(element) {
+  const [origin, columnVector, rowVector] = element.points;
+  if (!columnVector || !rowVector) return [[0, 0]];
+  const cols = Math.max(1, element.cols ?? 1);
+  const rows = Math.max(1, element.rows ?? 1);
+  const placements = [];
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < cols; column += 1) {
+      placements.push([
+        (origin?.[0] ?? 0) + columnVector[0] * column + rowVector[0] * row,
+        (origin?.[1] ?? 0) + columnVector[1] * column + rowVector[1] * row
+      ]);
+    }
+  }
+  return placements;
 }

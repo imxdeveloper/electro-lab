@@ -200,10 +200,12 @@ test('Chip View reads legacy-numbered layouts and offers per-layer visibility', 
   });
 
   const model = page.locator('[data-chipview-model]');
+  await expect(model).toContainText('PDK not recognised');
   await expect(model).toContainText('3 layer(s)');
-  await expect(model).toContainText('50.0 × 60.0 µm');
-  // A 1 nm database unit is normal, so no unit caveat is shown.
-  await expect(model.locator('.chip-view-model-warning')).toHaveCount(0);
+  await expect(model).toContainText('40.0 × 50.0 µm');
+  // A toy library matches no PDK map, so the panel says so instead of borrowing
+  // another technology's layer names.
+  await expect(model.locator('.chip-view-model-warning')).toContainText('PDK is not recognised');
 
   const layers = page.locator('.chip-view-layer');
   await expect(layers).toHaveCount(3);
