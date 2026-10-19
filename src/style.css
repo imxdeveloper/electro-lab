@@ -628,6 +628,47 @@ button, input, select {
 .board-panel-buttons button:disabled { opacity: 0.45; cursor: default; }
 .board-panel-buttons [data-board-action="create"] { border-color: #4b916d; color: #b7f7d0; }
 .board-panel footer { padding: 9px 12px; border-top: 1px solid #344358; color: #9eacc0; font-size: 11px; line-height: 1.45; }
+.chip-view-panel {
+  position: fixed; z-index: 2147483646; top: 92px; left: 76px; width: 296px; max-height: calc(100vh - 124px);
+  display: flex; flex-direction: column; overflow: hidden; border: 1px solid #40536c; border-radius: 9px;
+  background: #111722; color: #e7edf5; box-shadow: 0 12px 38px rgba(0, 0, 0, 0.5);
+}
+.chip-view-panel[hidden] { display: none; }
+.chip-view-panel header { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #344358; background: #1b2635; font-size: 13px; }
+.chip-view-panel header button { width: 24px; height: 24px; border: 1px solid #40536c; border-radius: 5px; background: #202d3d; color: #edf4ff; cursor: pointer; font-size: 16px; line-height: 1; }
+.chip-view-panel header button:hover { background: #2b4663; }
+.chip-view-body { display: flex; flex-direction: column; gap: 9px; padding: 11px 12px; overflow: auto; }
+.chip-view-intro, .chip-view-hint, .chip-view-notice { margin: 0; color: #9eacc0; font-size: 10.5px; line-height: 1.5; }
+.chip-view-notice { padding-top: 8px; border-top: 1px solid #2a3849; color: #7f8fa4; }
+.chip-view-import { padding: 9px 10px; border: 1px solid #4b916d; border-radius: 6px; background: #1d3a2c; color: #b7f7d0; cursor: pointer; font-size: 11.5px; text-align: left; }
+.chip-view-import:hover { background: #27543c; }
+.chip-view-models { display: grid; gap: 7px; }
+.chip-view-empty { margin: 0; padding: 10px 8px; border: 1px dashed #344358; border-radius: 7px; color: #9eacc0; font-size: 10.5px; text-align: center; }
+.chip-view-model { display: grid; grid-template-columns: 1fr auto; gap: 9px; align-items: center; padding: 8px; border: 1px solid #344358; border-radius: 7px; background: rgba(32, 45, 61, 0.72); }
+.chip-view-model-info { display: grid; gap: 3px; min-width: 0; }
+.chip-view-model-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.chip-view-model-info span { color: #9eacc0; font-size: 10px; }
+.chip-view-model-actions { display: flex; gap: 5px; }
+.chip-view-model-actions button { padding: 5px 7px; border: 1px solid #40536c; border-radius: 5px; background: #202d3d; color: #edf4ff; cursor: pointer; font-size: 10.5px; }
+.chip-view-model-actions button:hover { background: #2b4663; }
+.chip-view-layers { grid-column: 1 / -1; margin-top: 2px; border-top: 1px solid #2a3849; padding-top: 7px; }
+.chip-view-layers > summary { cursor: pointer; color: #a9c8e4; font-size: 10.5px; }
+.chip-view-stack { grid-column: 1 / -1; display: flex; gap: 12px; align-items: center; margin: 7px 0 0; color: #9eacc0; font-size: 10.5px; }
+.chip-view-stack label { display: flex; gap: 5px; align-items: center; }
+.chip-view-stack input[type="number"] { width: 60px; padding: 3px 5px; border: 1px solid #344358; border-radius: 4px; background: #111a26; color: #edf4ff; font-size: 10.5px; }
+.chip-view-stack input[type="checkbox"] { accent-color: #4b916d; }
+.chip-view-layers-actions { display: flex; gap: 5px; margin: 7px 0; }
+.chip-view-layers-actions button { padding: 4px 7px; border: 1px solid #40536c; border-radius: 5px; background: #202d3d; color: #edf4ff; cursor: pointer; font-size: 10px; }
+.chip-view-layers-actions button:hover { background: #2b4663; }
+.chip-view-layer-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 4px; max-height: 132px; overflow: auto; }
+.chip-view-layer { display: flex; align-items: center; gap: 5px; padding: 4px 6px; border: 1px solid #344358; border-radius: 5px; background: #1a2532; color: #c8d4e2; cursor: pointer; font-size: 10px; text-align: left; }
+.chip-view-layer[aria-pressed="false"] { opacity: 0.42; text-decoration: line-through; }
+.chip-view-layer:hover { background: #2b4663; }
+.chip-view-layer-swatch { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 2px; }
+.chip-view-layer em { color: #ffcf7a; font-size: 9px; font-style: normal; }
+.chip-view-model-warning { grid-column: 1 / -1; margin: 7px 0 0; color: #ffcf7a; font-size: 9.5px; line-height: 1.45; }
+.chip-view-panel footer { padding: 8px 12px; border-top: 1px solid #344358; color: #a9c8e4; font-size: 10.5px; line-height: 1.45; }
+.chip-view-panel footer.chip-view-status-error { color: #ffb4a2; }
 .circuit-tool-status { margin-top: 7px; color: #a9c8e4; font-size: 10px; line-height: 1.45; }
 .circuit-save-model {
   width: 100%; margin-top: 8px; padding: 8px 7px; border: 1px solid #426584; border-radius: 6px;

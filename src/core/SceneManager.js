@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GeometryUtils } from '../utils/GeometryUtils.js';
+import { createAnimatedCounterChip } from './AnimatedChip.js';
 
 const ORBITAL_FILL_ORDER = [
   [1, 's', 2], [2, 's', 2], [2, 'p', 6], [3, 's', 2], [3, 'p', 6],
@@ -194,6 +195,7 @@ export class SceneManager {
     this.objectsList = [];
     this.animatedAtoms = [];
     this.electrolysisAnimations = [];
+    this.animatedChips = [];
 
     this.initScene();
     this.initCameras();
@@ -353,11 +355,13 @@ export class SceneManager {
 
     this.scene.add(this.cursorGroup);
     this.cursorPosition = new THREE.Vector3(0, 0, 0);
+    this.cursorPlaced = false;
   }
 
   set3DCursorPosition(x, y, z) {
     this.cursorPosition.set(x, y, z);
     this.cursorGroup.position.copy(this.cursorPosition);
+    this.cursorPlaced = true;
   }
 
   get3DCursorPosition() {
@@ -439,6 +443,7 @@ export class SceneManager {
     this.scene.remove(obj);
     this.animatedAtoms = this.animatedAtoms.filter((animated) => animated !== obj);
     this.electrolysisAnimations = this.electrolysisAnimations.filter((animated) => animated !== obj);
+    this.animatedChips = this.animatedChips.filter((animated) => animated !== obj);
     const index = this.objectsList.indexOf(obj);
     if (index !== -1) {
       this.objectsList.splice(index, 1);
@@ -1615,6 +1620,24 @@ export class SceneManager {
     this.selectGeneratedObject(cell);
     this.animatedAtoms.push(cell);
     return cell;
+  }
+
+  createAnimatedCounterChip(options = {}) {
+    const { object, update } = createAnimatedCounterChip(options);
+    object.userData.animatedChipUpdate = update;
+    // Sit the die beside the startup scene content unless the 3D cursor was moved.
+    const cursor = this.cursorPlaced ? this.get3DCursorPosition() : null;
+    object.position.set(cursor ? cursor.x : 9.5, cursor ? Math.max(cursor.y, 0) : 0, cursor ? cursor.z : 5.5);
+    this.addObject(object);
+    this.selectGeneratedObject(object);
+    this.animatedChips.push(object);
+    return object;
+  }
+
+  updateAnimatedChips(delta) {
+    for (const chip of this.animatedChips) {
+      chip.userData.animatedChipUpdate?.(delta);
+    }
   }
 
   createRightHandRuleCopperConductor() {
@@ -2955,6 +2978,7 @@ export class SceneManager {
       });
     }
     this.electrolysisAnimations.forEach((simulation) => this.updateWaterElectrolysis(simulation, delta));
+    this.updateAnimatedChips(delta);
     this.updateCircuitFlow(delta);
   }
 

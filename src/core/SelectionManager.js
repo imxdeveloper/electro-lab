@@ -34,6 +34,9 @@ export class SelectionManager {
   }
 
   onPointerDown(e) {
+    // Chip View is a view-only workspace: navigation works, editing does not.
+    if (this.sceneManager.editor?.workspaceMode === 'chipview') return;
+
     // If Alt is pressed, this is Orbit/Pan/Zoom navigation -> NEVER select!
     if (e.altKey || this.navigation.isNavigating || this.navigation.justNavigated) {
       return;
@@ -155,6 +158,15 @@ export class SelectionManager {
 
   onKeyDown(e) {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) {
+      return;
+    }
+
+    // Chip View keeps the viewport read-only; camera and panel shortcuts still work.
+    if (this.sceneManager.editor?.workspaceMode === 'chipview') {
+      if (e.code === 'KeyA' || e.code === 'KeyH' || e.code === 'KeyX' || e.code === 'Delete') {
+        e.preventDefault();
+        this.clearSelection();
+      }
       return;
     }
 

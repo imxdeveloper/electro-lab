@@ -47,10 +47,21 @@ export class Editor {
   }
 
   async setWorkspaceMode(mode) {
-    if (!['atoms', 'circuits', 'chips', 'masks'].includes(mode)) return;
+    if (!['atoms', 'circuits', 'chips', 'masks', 'chipview'].includes(mode)) return;
     const requestId = ++this.workspaceRequestId;
     if (this.workspaceMode === mode) return;
+    const previousMode = this.workspaceMode;
+    const previousWasFree = this.isFreeCameraWorkspace(previousMode);
+    const nextIsFree = this.isFreeCameraWorkspace(mode);
+    // Atom Lab and Chip View share the same 3D viewport, so its camera is kept
+    // while switching between them and restored when leaving them.
+    if (previousWasFree && !nextIsFree) this.saveFreeCameraState();
     try {
+      if (mode === 'chipview' && !this.chipViewPanel) {
+        const { ChipViewPanel } = await import('../ui/ChipViewPanel.js');
+        if (requestId !== this.workspaceRequestId) return;
+        this.chipViewPanel = new ChipViewPanel(this);
+      }
       if (mode === 'chips' && !this.chipLabPanel) {
         const { ChipLabPanel } = await import('../ui/ChipLabPanel.js');
         if (requestId !== this.workspaceRequestId) return;
@@ -72,9 +83,11 @@ export class Editor {
     this.setCircuitToolMode?.(null);
     this.workspaceMode = mode;
     this.sceneManager.updateWorkspaceBackground();
+    const chipViewMode = mode === 'chipview';
     this.root.classList.toggle('circuit-workspace', mode === 'circuits');
     this.root.classList.toggle('chip-workspace', mode === 'chips');
     this.root.classList.toggle('mask-workspace', mode === 'masks');
+    this.root.classList.toggle('chipview-workspace', chipViewMode);
     this.topHeader?.updateWorkspaceMode(mode);
     this.addMenuModal?.setWorkspaceMode(mode);
     if (mode === 'circuits' || mode === 'chips' || mode === 'masks') {
@@ -86,6 +99,8 @@ export class Editor {
     const circuitMode = mode === 'circuits';
     const chipMode = mode === 'chips';
     const maskMode = mode === 'masks';
+    // Chip View is view-only, so never carry a selection into it.
+    if (chipViewMode) this.selectionManager.clearSelection();
     if (circuitMode) {
       // Clear previously placed MOS logic gates and their attached connections.
       for (const object of [...this.sceneManager.objectsList]) {
@@ -107,15 +122,13 @@ export class Editor {
         const content = this.circuitDock.querySelector(`#${button.getAttribute('aria-controls')}`);
         if (content) content.hidden = false;
       });
-      this._atomCameraState = {
-        position: this.sceneManager.activeCamera.position.clone(),
-        up: this.sceneManager.activeCamera.up.clone(),
-        target: this.navigation.target.clone()
-      };
       this.selectionManager.clearSelection();
     }
     for (const object of this.sceneManager.objectsList) {
-      object.visible = maskMode ? false : chipMode ? false : circuitMode ? Boolean(object.userData?.circuitComponent) : !object.userData?.circuitComponent;
+      object.visible = maskMode || chipMode ? false
+        : circuitMode ? Boolean(object.userData?.circuitComponent)
+        : chipViewMode ? Boolean(object.userData?.chipViewModel)
+        : !object.userData?.circuitComponent && !object.userData?.chipViewModel;
     }
     this.sceneManager.gridHelper.visible = !chipMode && !maskMode;
     this.sceneManager.axisLineX.visible = !circuitMode && !chipMode && !maskMode;
@@ -128,7 +141,7 @@ export class Editor {
       camera.lookAt(0, 0, 0);
       this.navigation.target.set(0, 0, 0);
       this.navigation.updateSphericalFromCamera();
-    } else if (this._atomCameraState) {
+    } else if (!previousWasFree && nextIsFree && this._atomCameraState) {
       const camera = this.sceneManager.activeCamera;
       camera.position.copy(this._atomCameraState.position);
       camera.up.copy(this._atomCameraState.up);
@@ -144,6 +157,7 @@ export class Editor {
     if (dockMode) dockMode.value = mode;
     this.chipLabPanel?.setActive(chipMode);
     this.maskLabPanel?.setActive(maskMode);
+    this.chipViewPanel?.setActive(chipViewMode);
     this.updateHUDText();
     requestAnimationFrame(() => {
       this.sceneManager.onResize();
@@ -197,7 +211,7 @@ export class Editor {
         <section class="circuit-section">
           <h2><span>Workspace</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-workspace-controls" title="Minimize workspace controls">âˆ’</button></h2>
           <label id="circuit-workspace-controls" class="circuit-mode-control">
-            <select aria-label="Workspace mode"><option value="atoms">Atom Lab</option><option value="circuits">Circuit Lab</option><option value="chips">Chip Lab</option></select>
+            <select aria-label="Workspace mode"><option value="atoms">Atom Lab</option><option value="chipview">Chip View</option><option value="circuits">Circuit Lab</option><option value="chips">Chip Lab</option></select>
           </label>
         </section>
         <section class="circuit-section circuit-only-section">
@@ -470,6 +484,12 @@ export class Editor {
       event.preventDefault();
       this.sceneManager.createRightHandRuleCopperConductor();
     });
+    window.addEventListener('keydown', (event) => {
+      if (event.code !== 'KeyG' || !event.shiftKey || event.ctrlKey || event.altKey || event.repeat) return;
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      event.preventDefault();
+      this.sceneManager.createAnimatedCounterChip();
+    });
     this.circuitDock.querySelectorAll('[data-circuit]').forEach((button) => {
       button.addEventListener('click', () => this.sceneManager.createCircuitComponent(button.dataset.circuit));
     });
@@ -539,11 +559,29 @@ export class Editor {
     this.viewportEl.addEventListener('drop', (e) => {
       e.preventDefault();
       this.viewportEl.classList.remove('drag-over');
-      const file = e.dataTransfer.files?.[0];
-      if (file) {
-        this.importModelFile(file);
+      const files = Array.from(e.dataTransfer.files ?? []);
+      const file = files[0];
+      if (!file) return;
+      // Chip View is view-only, so drops there are imported through its panel.
+      if (this.workspaceMode === 'chipview') {
+        this.chipViewPanel?.handleFiles(files);
+        return;
       }
+      this.importModelFile(file);
     });
+  }
+
+  // Atom Lab, Circuit Lab, and Chip View are 3D workspaces with a free camera.
+  isFreeCameraWorkspace(mode) {
+    return mode === 'atoms' || mode === 'circuits' || mode === 'chipview';
+  }
+
+  saveFreeCameraState() {
+    this._atomCameraState = {
+      position: this.sceneManager.activeCamera.position.clone(),
+      up: this.sceneManager.activeCamera.up.clone(),
+      target: this.navigation.target.clone()
+    };
   }
 
   updateHUDText() {
@@ -1155,12 +1193,11 @@ export class Editor {
   }
 
   startLoop() {
-    if (this.loopFrameId !== null || document.hidden ||
-        (this.workspaceMode !== 'atoms' && this.workspaceMode !== 'circuits')) return;
+    if (this.loopFrameId !== null || document.hidden || !this.isFreeCameraWorkspace(this.workspaceMode)) return;
     let previousFrame = performance.now();
     const render = (now) => {
       this.loopFrameId = null;
-      if (document.hidden || (this.workspaceMode !== 'atoms' && this.workspaceMode !== 'circuits')) return;
+      if (document.hidden || !this.isFreeCameraWorkspace(this.workspaceMode)) return;
       this.sceneManager.updateAnimations(Math.min((now - previousFrame) / 1000, 0.1));
       previousFrame = now;
       this.sceneManager.render();

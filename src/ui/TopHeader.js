@@ -110,6 +110,7 @@ export class TopHeader {
         <div class="electroDesigner-mode-selector" title="Choose a science workspace">
           <select id="workspace-mode-select" aria-label="Workspace mode">
             <option value="atoms">Atom Lab</option>
+            <option value="chipview">Chip View</option>
             <option value="circuits">Circuit Lab</option>
             <option value="chips">Chip Lab</option>
             <option value="masks">Mask Lab</option>

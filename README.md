@@ -1,6 +1,6 @@
 # Electro Designer Web 3D Editor 🎨
 
-A browser-based 3D workspace for exploring atoms and molecules, building circuit layouts, and modeling objects. Built with Three.js and WebGL, it includes editable 3D objects, viewport navigation, an animation timeline, and an Atom Lab / Circuit Lab workspace switch.
+A browser-based 3D workspace for exploring atoms and molecules, building circuit layouts, and modeling objects. Built with Three.js and WebGL, it includes editable 3D objects, viewport navigation, an animation timeline, and an Atom Lab / Chip View / Circuit Lab workspace switch.
 
 ---
 
@@ -42,6 +42,34 @@ Mask Lab provides separate SKY130, GF180MCU, and process-agnostic educational pr
 - Mask edits autosave in the browser; if storage is blocked or full, Mask Lab reports the failure and recommends exporting a copy. Chip Lab source, power-check, simulation, and test-bench provenance stays with an untouched auto-filled mask and its JSON export.
 - Use **Training** for four guided exercises: a single feature, a parallel line pair, a square frame, and a 4 × 4 array. Exact mask checks, hints, scores, and completion progress are saved in the browser. Training preserves and restores the mask you were editing.
 - The 3D viewport animation pauses while a 2D lab is open or the browser tab is hidden, then resumes when returning to the 3D workspaces.
+
+---
+
+## 🎞️ Animated Counter Chip (Atom Lab)
+
+A self-running chip demo — nothing to import. Press <kbd>Shift</kbd> + <kbd>G</kbd> or use <kbd>Shift</kbd> + <kbd>A</kbd> → **Add → Animated Chips → Animated Counter Chip**.
+
+- An 8-bit counter die laid out as a layer stack: substrate, diffusion, eight standard cells with poly gates, a clock distribution line, metal 1 traces, vias, a metal 2 output bus, and passivation over the top.
+- The clock free-runs at 1 Hz and the counter counts forever. Each cell's gate lights up for a `1` bit, the matching output trace carries an electron to its pad, the pad and via glow, and a floating readout shows the value in binary and hex.
+- The die is placed beside the startup scene, or on the 3D cursor if you have moved it. It is an ordinary editable object: move, rotate, duplicate, or delete it with <kbd>X</kbd> like any other.
+- The animation pauses with the rest of the 3D viewport while Chip Lab or Mask Lab is open or the tab is hidden, and a dropped frame still counts every clock edge it spanned. The clock period, bit width, and start value are parameters of `AnimatedChipModel` in `src/core/AnimatedChip.js`.
+
+---
+
+## 🔍 Chip View (Atom Lab Clone)
+
+Chip View is an Atom Lab clone kept read-only. It shares the Atom Lab 3D viewport, grid, and camera, and its small panel has one job: importing chip files so you can look at them.
+
+- Press <kbd>Shift</kbd> + <kbd>A</kbd> and choose **Add → Chip View → Open Chip View (view GDS / GLTF)**, or pick **Chip View** in the workspace selector.
+- Use the panel's **Import 3D file (GDS / GDSII / GLTF / GLB)** button. For a `.gltf` with an external `.bin` buffer or textures, select every file of the model in one go.
+- Imported files are listed with their format, layer or mesh count, and drawing size, with **Focus** to re-frame a model and **Remove** to dispose of it. Drag & drop onto the viewport imports into Chip View as well.
+- Each GDSII import gets a **Layers** list with a color swatch, layer/datatype number, element count, and coverage of the drawing. Toggle layers individually or use **Show all** / **Hide all**. Layers covering more than 75 % of the drawing (fill and plate artwork) are tagged **fill**, and the list opens automatically when one is present, because otherwise a single fill polygon hides the whole die.
+- GDSII boundaries, boxes, and paths are extruded into shaded 3D solids, one mesh per layer/datatype, normalized to the viewport and colored per layer. Both GDSII record numberings are supported: the current table and the older table still emitted by some OpenLane/KLayout flows, which is detected from the stream itself.
+- **Layers are stacked, not flat.** Each layer gets its own height, ordered by layer number (diffusion and implant low, metals and top layers high), so the import reads as a stack-up instead of overlapping planes. Use **Stack layers by number** to flatten every layer back onto the floor plane, and **Gap** to spread or compress the stack. The default gap shrinks automatically for layouts with many layers so the stack stays shorter than the drawing. Layer-number order is an approximation of a real process stack-up, not a PDK layer map.
+- Structure references (SREF), array references (AREF), labels (TEXT), and nodes are counted and reported, not flattened into geometry. Layouts above 20 000 drawable elements are truncated and the panel reports how many were skipped.
+- Database units come from the UNITS record. Some OpenLane layouts declare an implausible unit (for example 0.001 nm per database unit); Chip View then reports the size in database units and shows the caveat instead of printing a meaningless 0.0 µm. The 3D view is normalized to the drawing, so it is unaffected either way.
+- Chip View is view-only: imported objects cannot be selected, moved, deleted, or edited in the viewport, and Atom Lab objects are hidden while Chip View is active. Remove imports from the panel. Unreadable or unsupported files report the failure in the panel instead of failing silently.
+- Chip View is a preview, not a layout engine: it does not run DRC or LVS, does not implement a PDK grid or layer map, and produces no signoff-ready GDSII/OASIS. Use a real PDK tool flow for physical verification.
 
 ---
 
@@ -117,6 +145,7 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
 3. **Add Menu (<kbd>Shift + A</kbd>)**:
    - Mesh primitives: Cube, UV Sphere, Cylinder, Cone, Torus, Plane, and **Monkey (Suzanne)**!
    - Lights: Sun Light, Point Light, Spot Light.
+   - **Chip View: Open Chip View (view GDS / GLTF)** — see the Chip View section.
 
 4. **Object & Edit Modes (<kbd>Tab</kbd>)**:
    - Press <kbd>Tab</kbd> to enter **Edit Mode**.
@@ -173,6 +202,7 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
  - Use Shift + O function to find more fun things
  - Use Shift + S function to add solar panel
  - Use Shift + B function to see what is right hand rule 
+ - Use Shift + G function to add a self-running Animated Counter Chip (8-bit, no import needed) 
 
 You can also add more fun things using more keys with ctrl + any or shift + something you might change anyhow :) Have Fun 
 

@@ -1,7 +1,29 @@
 import { expect, test } from '@playwright/test';
+import { createLegacySampleGds, createSampleGds } from '../helpers/gdsFixture.js';
+import { createSampleGlb } from '../helpers/gltfFixture.js';
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/');
+});
+
+test('the Add menu places a self-running animated counter chip', async ({ page }) => {
+  await page.keyboard.press('Shift+A');
+  await page.locator('.add-popup-item[data-type="animated-chip"]').click();
+
+  await expect(page.locator('.outliner-item-name', { hasText: 'Animated Counter Chip' })).toBeVisible();
+
+  // The chip free-runs: the readout counter advances without any input.
+  const readValue = () => page.evaluate(() => {
+    const chip = window.electroDesignerEditor?.sceneManager.objectsList
+      .find((object) => object.userData.animatedChip);
+    return chip ? { value: chip.userData.counterValue, binary: chip.userData.counterBinary, ticks: chip.userData.clockTicks } : null;
+  });
+  const first = await readValue();
+  await expect.poll(readValue, { timeout: 8000 }).not.toEqual(first);
+
+  // It is removed with the rest of the scene objects.
+  await page.keyboard.press('x');
+  await expect.poll(readValue).toBeNull();
 });
 
 test('Mask Lab supports keyboard pixel navigation and painting', async ({ page }) => {
@@ -124,4 +146,110 @@ test('Mask Lab reports storage failures and offers export recovery', async ({ pa
 
   await expect(page.locator('[data-mask-status]')).toContainText('Autosave failed');
   await expect(page.locator('[data-mask-status]')).toContainText('Export the mask to keep a copy');
+});
+
+test('the Add menu opens Chip View, which imports a GDS layout for viewing only', async ({ page }) => {
+  const initiallyLoaded = await page.evaluate(() =>
+    performance.getEntriesByType('resource').map(({ name }) => name)
+  );
+  expect(initiallyLoaded.some((url) => url.includes('ChipViewPanel'))).toBe(false);
+
+  await page.keyboard.press('Shift+A');
+  await page.locator('.add-popup-item[data-type="chipview"]').click();
+
+  await expect(page.locator('#workspace-mode-select')).toHaveValue('chipview');
+  await expect(page.locator('.chip-view-panel')).toBeVisible();
+  await expect(page.locator('[data-chipview-status]')).toHaveText('No chip imported yet.');
+
+  await page.locator('[data-chipview-input]').setInputFiles({
+    name: 'demo-layout.gds',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(createSampleGds())
+  });
+
+  const model = page.locator('[data-chipview-model]');
+  await expect(model).toHaveCount(1);
+  await expect(model).toContainText('demo-layout');
+  await expect(model).toContainText('GDSII');
+  await expect(model).toContainText('3 layer(s)');
+  await expect(page.locator('[data-chipview-status]')).toContainText('imported for viewing');
+
+  // Chip View stays read-only: clicking the imported geometry selects nothing.
+  const viewport = page.locator('.electroDesigner-viewport');
+  await viewport.click({ position: { x: 420, y: 320 } });
+  await expect(page.locator('#hud-obj-text')).toHaveText('Collection | (None selected)');
+
+  // Atom Lab objects stay hidden while their own workspace is not active.
+  await page.locator('#workspace-mode-select').selectOption('atoms');
+  await expect(page.locator('.chip-view-panel')).toBeHidden();
+  await page.locator('#workspace-mode-select').selectOption('chipview');
+  await expect(page.locator('.chip-view-panel')).toBeVisible();
+  await expect(page.locator('[data-chipview-model]')).toHaveCount(1);
+
+  await page.locator('[data-chipview-model-action="remove"]').click();
+  await expect(page.locator('[data-chipview-model]')).toHaveCount(0);
+  await expect(page.locator('[data-chipview-status]')).toHaveText('No chip imported yet.');
+});
+
+test('Chip View reads legacy-numbered layouts and offers per-layer visibility', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chipview');
+  await page.locator('[data-chipview-input]').setInputFiles({
+    name: 'openlane-layout.gds',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(createLegacySampleGds())
+  });
+
+  const model = page.locator('[data-chipview-model]');
+  await expect(model).toContainText('3 layer(s)');
+  await expect(model).toContainText('50.0 × 60.0 µm');
+  // A 1 nm database unit is normal, so no unit caveat is shown.
+  await expect(model.locator('.chip-view-model-warning')).toHaveCount(0);
+
+  const layers = page.locator('.chip-view-layer');
+  await expect(layers).toHaveCount(3);
+  await expect(model.locator('.chip-view-layer em')).toHaveCount(0);
+
+  // Layers are stacked by layer number, and the stack can be flattened again.
+  await expect(model.locator('[data-chipview-stack]')).toBeChecked();
+  await model.locator('[data-chipview-stack]').uncheck();
+  await expect(model.locator('[data-chipview-stack]')).not.toBeChecked();
+  await expect(model.locator('[data-chipview-gap]')).toHaveValue('0.3');
+  await model.locator('[data-chipview-gap]').fill('0.9');
+  await expect(model.locator('[data-chipview-gap]')).toHaveValue('0.9');
+
+  await model.locator('.chip-view-layers > summary').click();
+  await layers.first().click();
+  await expect(layers.first()).toHaveAttribute('aria-pressed', 'false');
+  await model.locator('[data-chipview-layers-action="show"]').click();
+  await expect(layers.first()).toHaveAttribute('aria-pressed', 'true');
+  await model.locator('[data-chipview-layers-action="hide"]').click();
+  await expect(layers.first()).toHaveAttribute('aria-pressed', 'false');
+});
+
+test('Chip View imports a GLB model and lists its mesh details', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chipview');
+  await page.locator('[data-chipview-input]').setInputFiles({
+    name: 'package.glb',
+    mimeType: 'model/gltf-binary',
+    buffer: Buffer.from(createSampleGlb())
+  });
+
+  const model = page.locator('[data-chipview-model]');
+  await expect(model).toHaveCount(1);
+  await expect(model).toContainText('package');
+  await expect(model).toContainText('GLB');
+  await expect(model).toContainText('1 mesh(es)');
+  await expect(page.locator('[data-chipview-status]')).toContainText('imported for viewing');
+});
+
+test('Chip View reports unreadable chip files instead of loading nothing silently', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chipview');
+  await page.locator('[data-chipview-input]').setInputFiles({
+    name: 'broken.gds',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from([1, 2, 3, 4, 5])
+  });
+
+  await expect(page.locator('[data-chipview-status]')).toHaveClass(/chip-view-status-error/);
+  await expect(page.locator('[data-chipview-model]')).toHaveCount(0);
 });

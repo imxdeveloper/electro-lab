@@ -93,6 +93,16 @@ export class AddMenuModal {
         <button class="add-popup-item" data-type="science-rhr" title="Right-Hand Rule & Copper E-Field (Shift + B)">
           <span class="icon">${Icons.meshIcon}</span> Right-Hand Rule (Cu E-Field & Holes)
         </button>
+        <div class="add-popup-divider"></div>
+        <div class="add-popup-category">Chip View</div>
+        <button class="add-popup-item" data-type="chipview" title="Open the Chip View workspace to inspect a GDS or GLTF chip">
+          <span class="icon">${Icons.meshIcon}</span> Open Chip View (view GDS / GLTF)
+        </button>
+        <div class="add-popup-divider"></div>
+        <div class="add-popup-category">Animated Chips</div>
+        <button class="add-popup-item" data-type="animated-chip" title="Self-running 8-bit counter chip with moving electrons (Shift + G)">
+          <span class="icon">${Icons.meshIcon}</span> Animated Counter Chip
+        </button>
 
         </div>
         <div class="circuit-mode-content" style="display:none">
@@ -155,6 +165,10 @@ export class AddMenuModal {
         this.editor.sceneManager.createCircuitComponent(btn.dataset.component);
       } else if (type === 'science-rhr') {
         this.editor.sceneManager.createRightHandRuleCopperConductor();
+      } else if (type === 'chipview') {
+        this.editor.setWorkspaceMode('chipview');
+      } else if (type === 'animated-chip') {
+        this.editor.sceneManager.createAnimatedCounterChip();
       }
 
       this.close();
@@ -202,10 +216,16 @@ export class AddMenuModal {
   setWorkspaceMode(mode) {
     const atoms = this.el.querySelector('.atom-mode-content');
     const circuits = this.el.querySelector('.circuit-mode-content');
-    if (atoms) atoms.style.display = mode === 'atoms' ? '' : 'none';
+    // Chip View is an Atom Lab clone, so it keeps the Atom Lab science entries
+    // plus the Chip View shortcut that opened it.
+    if (atoms) atoms.style.display = mode === 'atoms' || mode === 'chipview' ? '' : 'none';
     if (circuits) circuits.style.display = mode === 'circuits' ? '' : 'none';
     const header = this.el.querySelector('.add-popup-header');
-    if (header) header.textContent = mode === 'circuits' ? 'Add Circuit Part' : 'Add Atom or Molecule';
+    if (header) {
+      header.textContent = mode === 'circuits'
+        ? 'Add Circuit Part'
+        : mode === 'chipview' ? 'Add to Chip View' : 'Add Atom or Molecule';
+    }
   }
 
   close() {

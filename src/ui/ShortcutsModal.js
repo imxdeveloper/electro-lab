@@ -56,6 +56,7 @@ export class ShortcutsModal {
             <div class="shortcut-item"><kbd>Shift + W</kbd><span>Atom Lab: Conductive Elements Menu · Circuit Lab: disabled</span></div>
             <div class="shortcut-item"><kbd>Shift + S</kbd><span>Atom Lab: Add Solar Cell</span></div>
             <div class="shortcut-item"><kbd>Shift + B</kbd><span>Right-Hand Rule: Copper E-Field & Electron Hole Flow</span></div>
+            <div class="shortcut-item"><kbd>Shift + G</kbd><span>Atom Lab: Add self-running Animated Counter Chip</span></div>
             <div class="shortcut-item"><kbd>Shift + D</kbd><span>Duplicate Object</span></div>
             <div class="shortcut-item"><kbd>X / Delete</kbd><span>Delete Selected Objects</span></div>
             <div class="shortcut-item"><kbd>A / Alt + A</kbd><span>Select All / Deselect All</span></div>

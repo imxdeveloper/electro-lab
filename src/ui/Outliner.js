@@ -70,6 +70,12 @@ export class Outliner {
       const trashBtn = e.target.closest('.outliner-trash-btn');
       if (trashBtn) {
         e.stopPropagation();
+        // Chip View imports are removed from their panel, not from the outliner.
+        if (obj.userData?.chipViewModel) {
+          this.editor.chipViewPanel?.removeModelByObject(obj);
+          this.editor.chipViewPanel?.setStatus(`${obj.name} was removed from Chip View.`);
+          return;
+        }
         this.editor.sceneManager.removeObject(obj);
         return;
       }
