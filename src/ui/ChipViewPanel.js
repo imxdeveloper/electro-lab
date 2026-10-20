@@ -34,7 +34,7 @@ export class ChipViewPanel {
         <p class="chip-view-hint">For a .gltf with external .bin or textures, select every file of the model at once.</p>
         <div class="chip-view-models" data-chipview-models></div>
         <footer data-chipview-status>No chip imported yet.</footer>
-        <p class="chip-view-notice">Preview only. GDSII boundaries and paths are extruded for viewing; structure references, array references, and labels are counted, not flattened. No DRC, LVS, or foundry signoff is performed.</p>
+        <p class="chip-view-notice">Preview only. GDSII boundaries and paths are extruded for viewing; structure and array references are flattened up to the viewer limit. No DRC, LVS, or foundry signoff is performed.</p>
       </div>
     `;
 
@@ -83,6 +83,7 @@ export class ChipViewPanel {
       const id = Number(button.closest('[data-chipview-model]').dataset.chipviewModel);
       if (button.dataset.chipviewModelAction === 'focus') this.focusModel(id);
       if (button.dataset.chipviewModelAction === 'remove') this.removeModel(id);
+      if (button.dataset.chipviewModelAction === 'open-mask') this.openModelInMaskLab(id);
     });
 
     this.modelList.addEventListener('change', (event) => {
@@ -244,6 +245,7 @@ export class ChipViewPanel {
       this.addModel({
         name: file.name.replace(/\.[^/.]+$/, ''),
         format: summary.format,
+        gdsBuffer: buffer,
         object: group,
         detail: `${summary.pdk && summary.pdk !== 'unknown' ? summary.pdk : 'PDK not recognised'} · ${summary.layers} layer(s) · ${shapeText} · ${sizeText}`,
         stack: { stacked: true, gap: summary.stackGap ?? DEFAULT_STACK_GAP },
@@ -306,7 +308,7 @@ export class ChipViewPanel {
     }
   }
 
-  addModel({ name, format, object, detail, urls = [], stack = { stacked: true, gap: DEFAULT_STACK_GAP }, summary = null, warnings = [] }) {
+  addModel({ name, format, object, detail, urls = [], gdsBuffer = null, stack = { stacked: true, gap: DEFAULT_STACK_GAP }, summary = null, warnings = [] }) {
     object.userData.chipViewModel = true;
     object.traverse((node) => {
       node.userData.chipViewModel = true;
@@ -316,7 +318,7 @@ export class ChipViewPanel {
       }
     });
 
-    const model = { id: this.nextId++, name, format, object, detail, urls, stack, summary, warnings };
+    const model = { id: this.nextId++, name, format, object, detail, urls, gdsBuffer, stack, summary, warnings };
     this.models.push(model);
     this.editor.sceneManager.addObject(object);
     this.renderModels();
@@ -337,6 +339,18 @@ export class ChipViewPanel {
       .normalize();
     if (direction.lengthSq() < 0.1) direction.set(0.8, 1, 0.8).normalize();
     this.editor.navigation.animateTo(center.clone().addScaledVector(direction, maxDim * 2.4), center);
+  }
+
+  async openModelInMaskLab(id) {
+    const model = this.models.find((entry) => entry.id === id);
+    if (!model?.gdsBuffer) return;
+    try {
+      await this.editor.setWorkspaceMode('masks');
+      if (this.editor.workspaceMode !== 'masks' || !this.editor.maskLabPanel) return;
+      this.editor.maskLabPanel.importGdsLayers(model.gdsBuffer, `${model.name}.gds`);
+    } catch (error) {
+      this.setStatus(`Could not open GDS layers in Mask Lab: ${error.message}`, true);
+    }
   }
 
   removeModelByObject(object) {
@@ -404,6 +418,7 @@ export class ChipViewPanel {
         </div>
         <div class="chip-view-model-actions">
           <button type="button" data-chipview-model-action="focus">Focus</button>
+          ${model.gdsBuffer ? '<button type="button" data-chipview-model-action="open-mask">Open layers in Mask Lab</button>' : ''}
           <button type="button" data-chipview-model-action="remove">Remove</button>
         </div>
         ${layers.length > 1 ? `

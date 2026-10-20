@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChipLabPanel } from '../src/ui/ChipLabPanel.js';
+import { ChipLabPanel, getPhysicalDesignTestGate } from '../src/ui/ChipLabPanel.js';
 
 const createPanel = (nodes, wires) => {
   const panel = Object.create(ChipLabPanel.prototype);
@@ -8,6 +8,22 @@ const createPanel = (nodes, wires) => {
   panel.wires = wires;
   return panel;
 };
+
+test('OpenLane gate requires passing tests for the exact current RTL', () => {
+  const currentVerilog = 'module chip(input a, output y); assign y = a; endmodule';
+  assert.match(getPhysicalDesignTestGate({ currentVerilog }), /at least one test vector/);
+  assert.match(getPhysicalDesignTestGate({
+    currentVerilog,
+    testedVerilog: currentVerilog,
+    steps: [{ result: true }, { result: false }]
+  }), /have not passed/);
+  assert.match(getPhysicalDesignTestGate({
+    currentVerilog,
+    testedVerilog: 'module chip(input a, output y); assign y = ~a; endmodule',
+    steps: [{ result: true }]
+  }), /design changed/);
+  assert.equal(getPhysicalDesignTestGate({ currentVerilog, testedVerilog: currentVerilog, steps: [{ result: true }] }), null);
+});
 
 test('multi-bit XOR preserves width and propagates the binary result', () => {
   const nodes = [

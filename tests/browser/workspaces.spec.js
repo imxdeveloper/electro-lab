@@ -118,6 +118,11 @@ test('Chip Lab Generate Mask switches labs and keeps mask pixels when resizing',
   await page.locator('[data-chip-add="VPLUS"]').click();
   await page.locator('[data-chip-action="generate-mask"]').click();
 
+  const setup = page.locator('[data-chip-mask-setup-modal]');
+  await expect(setup).toBeVisible();
+  await expect(setup.locator('[data-chip-mask-profile-summary]')).toContainText('conceptual editor layers');
+  await setup.locator('[data-chip-action="confirm-mask-setup"]').click();
+
   await expect(page.locator('#workspace-mode-select')).toHaveValue('masks');
   await expect(page.locator('[data-mask-source]')).toHaveText('Untitled Logic Chip');
   await expect(page.locator('[data-mask-count]')).not.toHaveText('0');
@@ -254,4 +259,84 @@ test('Chip View reports unreadable chip files instead of loading nothing silentl
 
   await expect(page.locator('[data-chipview-status]')).toHaveClass(/chip-view-status-error/);
   await expect(page.locator('[data-chipview-model]')).toHaveCount(0);
+});
+
+test('OpenLane is blocked until the current design has passing Test Lab vectors', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chips');
+  await page.locator('[data-chip-add="INPUT"]').click();
+  await page.locator('[data-chip-add="NOT"]').click();
+  await page.locator('[data-chip-add="OUTPUT"]').click();
+  await page.evaluate(() => {
+    const chipLab = window.electroDesignerEditor.chipLabPanel;
+    const [input, inverter, output] = chipLab.nodes;
+    chipLab.wires = [
+      { from: input.id, output: 0, to: inverter.id, input: 0 },
+      { from: inverter.id, output: 0, to: output.id, input: 0 }
+    ];
+    chipLab.render();
+  });
+  await page.route('**/api/eda/jobs', (route) => route.fulfill({ status: 500, body: '{"error":"Unexpected OpenLane request"}' }));
+  await page.locator('[data-chip-action="asic-flow"]').click();
+  await page.evaluate(() => {
+    const chipLab = window.electroDesignerEditor?.chipLabPanel;
+    if (!chipLab) throw new Error('Chip Lab did not load.');
+    chipLab.asicRunnerReady = true;
+    chipLab.el.querySelector('[data-chip-action="run-asic-flow"]').disabled = false;
+  });
+  await page.locator('[data-chip-action="run-asic-flow"]').click();
+  await expect(page.locator('[data-chip-testbench-modal]')).toBeVisible();
+  await expect(page.locator('[data-chip-asic-status]')).toContainText('at least one test vector');
+});
+
+test('a completed OpenLane job opens its GDS directly in Mask Lab', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chips');
+  await page.waitForSelector('.chip-lab');
+  await page.route('**/api/eda/jobs/demo-job/files/gds-0', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/octet-stream',
+    body: Buffer.from(createSampleGds())
+  }));
+  await page.evaluate(async () => {
+    const chip = window.electroDesignerEditor.chipLabPanel;
+    await chip.openAsicFlow();
+    chip.renderAsicJob({
+      id: 'demo-job', designName: 'demo', pdk: 'sky130A', status: 'succeeded', exitCode: 0, log: '',
+      artifacts: [{ id: 'gds-0', name: 'demo.gds', kind: 'gds', url: '/api/eda/jobs/demo-job/files/gds-0' }]
+    });
+  });
+  await page.locator('[data-chip-action="open-asic-mask"]').click();
+  await expect(page.locator('#workspace-mode-select')).toHaveValue('masks');
+  await expect(page.locator('[data-mask-gds-viewer]')).toBeVisible();
+  await expect(page.locator('[data-mask-gds-summary]')).toContainText('demo.gds');
+  await expect(page.locator('[data-mask-gds-layer-toggle]')).toHaveCount(3);
+});
+
+test('Chip View sends actual GDS layers to the vector viewer in Mask Lab', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chipview');
+  await page.locator('[data-chipview-input]').setInputFiles({
+    name: 'layered-demo.gds',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(createSampleGds())
+  });
+  const model = page.locator('[data-chipview-model]');
+  await expect(model).toContainText('layered-demo');
+  await model.locator('[data-chipview-model-action="open-mask"]').click();
+
+  await expect(page.locator('#workspace-mode-select')).toHaveValue('masks');
+  const viewer = page.locator('[data-mask-gds-viewer]');
+  await expect(viewer).toBeVisible();
+  await expect(viewer.locator('[data-mask-gds-layer-toggle]')).toHaveCount(3);
+  await expect(viewer.locator('[data-mask-gds-svg] path').first()).toBeAttached();
+  await expect(viewer.locator('[data-mask-gds-summary]')).toContainText('layered-demo.gds');
+
+  const firstLayer = viewer.locator('[data-mask-gds-layer-toggle]').first();
+  const layerId = await firstLayer.getAttribute('data-mask-gds-layer-toggle');
+  await firstLayer.click();
+  await expect(firstLayer).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator(`#mask-gds-layer-${layerId.replace('/', '-')}`)).toBeHidden();
+
+  const svg = viewer.locator('[data-mask-gds-svg]');
+  const initialView = await svg.getAttribute('viewBox');
+  await viewer.locator('[data-mask-gds-zoom="in"]').click();
+  await expect.poll(() => svg.getAttribute('viewBox')).not.toBe(initialView);
 });

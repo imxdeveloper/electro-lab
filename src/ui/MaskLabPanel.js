@@ -3,6 +3,7 @@ import {
   MASK_EDITOR_GRID_PITCH_NM,
   MASK_TECHNOLOGIES
 } from '../data/MaskTechnologyProfiles.js';
+import { buildGdsVectorPreview } from '../utils/GdsVectorPreview.js';
 
 const MASK_STORAGE_KEY = 'electroDesigner.maskLab.current';
 const MASK_LEARNING_PROGRESS_KEY = 'electroDesigner.maskLab.learningProgress';
@@ -65,6 +66,9 @@ export class MaskLabPanel {
     this.name = 'MaskLab';
     this.technologyId = DEFAULT_MASK_TECHNOLOGY_ID;
     this.profileLayouts = this.createProfileLayouts(this.gridWidth, this.gridHeight);
+    this.gdsPreview = null;
+    this.gdsViewBox = null;
+    this.gdsPan = null;
     this.layerMasks = this.profileLayouts[this.technologyId].layers;
     this.activeLayerId = this.profileLayouts[this.technologyId].activeLayerId;
     this.sourceDesign = null;
@@ -103,6 +107,8 @@ export class MaskLabPanel {
           <button type="button" data-mask-action="clear">Clear</button>
           <button type="button" data-mask-action="fill">Fill</button>
           <button type="button" data-mask-action="invert">Invert</button>
+          <button type="button" data-mask-action="import-gds">View GDS layers</button>
+          <input type="file" data-mask-gds-input accept=".gds,.gdsii" hidden>
           <button type="button" data-mask-action="export" class="mask-primary">Export</button>
         </div>
       </header>
@@ -167,6 +173,15 @@ export class MaskLabPanel {
           </div>
         </aside>
       </div>
+      <section class="mask-gds-viewer" data-mask-gds-viewer hidden aria-label="GDS layer viewer">
+        <header><div><strong>GDS layer viewer</strong><span data-mask-gds-summary>Import a physical layout to inspect its actual geometry by layer.</span></div>
+          <div class="mask-gds-actions"><button type="button" data-mask-gds-close>Back to mask editor</button><button type="button" data-mask-gds-zoom="out" aria-label="Zoom out">−</button><button type="button" data-mask-gds-zoom="in" aria-label="Zoom in">+</button><button type="button" data-mask-gds-zoom="fit">Fit</button></div>
+        </header>
+        <div class="mask-gds-content"><nav aria-label="GDS layers"><div class="mask-gds-bulk-actions"><button type="button" data-mask-gds-layers-action="show">Show all</button><button type="button" data-mask-gds-layers-action="hide">Hide all</button></div><div data-mask-gds-layers></div></nav>
+          <div class="mask-gds-canvas"><svg data-mask-gds-svg role="img" aria-label="Vector view of the imported GDS layout" preserveAspectRatio="xMidYMid meet"></svg></div>
+        </div>
+        <p data-mask-gds-status role="status" aria-live="polite">GDS layers are read-only vector previews. They do not modify the educational raster or produce foundry signoff.</p>
+      </section>
       <div class="mask-learning-modal" data-mask-learning-modal hidden>
         <section role="dialog" aria-modal="true" aria-labelledby="mask-training-title">
           <header>
@@ -206,6 +221,11 @@ export class MaskLabPanel {
     this.profileNoticeEl = this.el.querySelector('[data-mask-profile-notice]');
     this.layerListEl = this.el.querySelector('[data-mask-layer-list]');
     this.autoFillButton = this.el.querySelector('[data-mask-action="auto-fill-chip"]');
+    this.gdsViewerEl = this.el.querySelector('[data-mask-gds-viewer]');
+    this.gdsSvgEl = this.el.querySelector('[data-mask-gds-svg]');
+    this.gdsLayersEl = this.el.querySelector('[data-mask-gds-layers]');
+    this.gdsSummaryEl = this.el.querySelector('[data-mask-gds-summary]');
+    this.gdsStatusEl = this.el.querySelector('[data-mask-gds-status]');
 
     this.loadState();
     this.bindEvents();
@@ -446,6 +466,30 @@ export class MaskLabPanel {
       if (button) this.selectLayer(button.dataset.maskLayer);
     });
     this.el.addEventListener('click', (event) => {
+      const bulkLayers = event.target.closest('[data-mask-gds-layers-action]');
+      if (bulkLayers) {
+        this.setGdsLayersVisible(bulkLayers.dataset.maskGdsLayersAction === 'show');
+        return;
+      }
+      if (event.target.closest('[data-mask-gds-close]')) {
+        this.el.classList.remove('gds-view-mode');
+        this.gdsViewerEl.hidden = true;
+        return;
+      }
+      const layerToggle = event.target.closest('[data-mask-gds-layer-toggle]');
+      if (layerToggle) {
+        const group = document.getElementById(`mask-gds-layer-${layerToggle.dataset.maskGdsLayerToggle.replace('/', '-')}`);
+        const visible = layerToggle.getAttribute('aria-pressed') !== 'true';
+        if (group) group.style.display = visible ? '' : 'none';
+        layerToggle.setAttribute('aria-pressed', String(visible));
+        return;
+      }
+      const zoom = event.target.closest('[data-mask-gds-zoom]');
+      if (zoom) {
+        if (zoom.dataset.maskGdsZoom === 'fit') this.fitGdsPreview();
+        else this.zoomGdsPreview(zoom.dataset.maskGdsZoom === 'in' ? 0.5 : 2);
+        return;
+      }
       const cell = event.target.closest('.mask-cell');
       if (cell) {
         this.paintCell(cell, this.brushMode === 'draw');
@@ -460,7 +504,37 @@ export class MaskLabPanel {
       if (action === 'invert') this.invertMask();
       if (action === 'export') this.exportMaskFile();
       if (action === 'auto-fill-chip') this.autoFillFromChipDesign();
+      if (action === 'import-gds') this.el.querySelector('[data-mask-gds-input]').click();
     });
+
+    this.el.querySelector('[data-mask-gds-input]').addEventListener('change', async (event) => {
+      const file = event.currentTarget.files?.[0];
+      event.currentTarget.value = '';
+      if (!file) return;
+      this.gdsStatusEl.textContent = `Reading ${file.name}…`;
+      try { this.importGdsLayers(await file.arrayBuffer(), file.name); }
+      catch (error) { this.gdsStatusEl.textContent = `Could not read GDS: ${error.message}`; }
+    });
+
+    this.gdsSvgEl.addEventListener('pointerdown', (event) => {
+      if (!this.gdsViewBox) return;
+      this.gdsPan = { x: event.clientX, y: event.clientY, viewBox: [...this.gdsViewBox] };
+      this.gdsSvgEl.setPointerCapture(event.pointerId);
+    });
+    this.gdsSvgEl.addEventListener('pointermove', (event) => {
+      if (!this.gdsPan) return;
+      const rect = this.gdsSvgEl.getBoundingClientRect();
+      const [x, y, width, height] = this.gdsPan.viewBox;
+      this.gdsViewBox = [
+        x - (event.clientX - this.gdsPan.x) / Math.max(rect.width, 1) * width,
+        y - (event.clientY - this.gdsPan.y) / Math.max(rect.height, 1) * height,
+        width, height
+      ];
+      this.setGdsSvgViewBox();
+    });
+    for (const eventName of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+      this.gdsSvgEl.addEventListener(eventName, () => { this.gdsPan = null; });
+    }
 
     this.el.querySelector('[data-mask-grid-size]').addEventListener('input', (event) => {
       const size = Number(event.target.value);
@@ -668,6 +742,117 @@ export class MaskLabPanel {
     }
   }
 
+  importGdsLayers(buffer, fileName = 'layout.gds') {
+    const preview = buildGdsVectorPreview(buffer);
+    if (!preview.layers.length || !preview.bounds) throw new Error('This GDS has no drawable geometry to display.');
+    this.gdsPreview = preview;
+    this.gdsFileName = fileName;
+    this.gdsViewerEl.hidden = false;
+    this.el.classList.add('gds-view-mode');
+    const units = `${Math.round(preview.width).toLocaleString()} × ${Math.round(preview.height).toLocaleString()} database units`;
+    this.gdsSummaryEl.textContent = `${fileName} · ${preview.pdk} · ${preview.layers.length} layer(s) · ${preview.renderedShapes.toLocaleString()} shapes · ${units}`;
+    this.gdsLayersEl.replaceChildren();
+    this.gdsSvgEl.replaceChildren();
+
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+    const geometryGroup = document.createElementNS(svgNamespace, 'g');
+    geometryGroup.setAttribute('transform', 'scale(1 -1)');
+    const metalOne = preview.layers.find(({ name }) => /(?:^|[._])met(?:al)?1(?:[._]|$)/i.test(name));
+    const boundary = preview.layers.filter(({ name }) => /prboundary/i.test(name));
+    const fallback = preview.layers.filter(({ role }) => role !== 'fill').sort((a, b) => a.shapes - b.shapes)[0];
+    const visibleLayerIds = new Set([metalOne?.id, ...boundary.map(({ id }) => id), ...(metalOne || boundary.length ? [] : [fallback?.id])].filter(Boolean));
+    for (const layer of preview.layers) {
+      const id = `${layer.layer}-${layer.datatype}`;
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mask-gds-layer';
+      button.dataset.maskGdsLayerToggle = layer.id;
+      const visibleByDefault = visibleLayerIds.has(layer.id);
+      button.setAttribute('aria-pressed', String(visibleByDefault));
+      button.title = `${layer.name} · ${layer.layer}/${layer.datatype} · ${layer.shapes.toLocaleString()} shapes · ${layer.role}`;
+      const swatch = document.createElement('span');
+      swatch.style.backgroundColor = layer.color;
+      const label = document.createElement('span');
+      label.textContent = layer.name;
+      const count = document.createElement('small');
+      count.textContent = layer.shapes.toLocaleString();
+      button.append(swatch, label, count);
+      this.gdsLayersEl.appendChild(button);
+
+      const layerGroup = document.createElementNS(svgNamespace, 'g');
+      layerGroup.id = `mask-gds-layer-${id}`;
+      layerGroup.dataset.gdsLayer = layer.id;
+      layerGroup.style.display = visibleByDefault ? '' : 'none';
+      layerGroup.setAttribute('aria-label', `${layer.name}, layer ${layer.layer}/${layer.datatype}`);
+      if (layer.polygons) {
+        const polygons = document.createElementNS(svgNamespace, 'path');
+        polygons.setAttribute('d', layer.polygons);
+        polygons.setAttribute('fill', layer.color);
+        polygons.setAttribute('fill-opacity', layer.role === 'fill' ? '0.14' : '0.64');
+        polygons.setAttribute('fill-rule', 'evenodd');
+        polygons.setAttribute('stroke', layer.color);
+        polygons.setAttribute('stroke-width', String(Math.max(preview.width, preview.height) / 1600));
+        layerGroup.appendChild(polygons);
+      }
+      for (const stroke of layer.strokes) {
+        const path = document.createElementNS(svgNamespace, 'path');
+        path.setAttribute('d', stroke.d);
+        path.setAttribute('fill', 'none');
+        path.setAttribute('stroke', layer.color);
+        path.setAttribute('stroke-width', String(stroke.width));
+        path.setAttribute('stroke-linecap', 'square');
+        path.setAttribute('stroke-linejoin', 'round');
+        layerGroup.appendChild(path);
+      }
+      geometryGroup.appendChild(layerGroup);
+    }
+    this.gdsSvgEl.appendChild(geometryGroup);
+    this.fitGdsPreview();
+    const notes = [...preview.warnings];
+    if (preview.dbuNm !== null && (preview.dbuNm < 0.1 || preview.dbuNm > 100)) {
+      notes.push(`The GDS declares an unusual ${preview.dbuNm.toPrecision(4)} nm database unit; geometry is shown in raw database coordinates.`);
+    }
+    this.gdsStatusEl.textContent = notes.length
+      ? notes.join(' ')
+      : 'GDS layer geometry is shown as a read-only vector preview. This does not modify the educational raster or provide foundry signoff.';
+    return preview;
+  }
+
+  setGdsSvgViewBox() {
+    if (this.gdsViewBox) this.gdsSvgEl.setAttribute('viewBox', this.gdsViewBox.join(' '));
+  }
+
+  setGdsLayersVisible(visible) {
+    this.gdsLayersEl.querySelectorAll('[data-mask-gds-layer-toggle]').forEach((button) => {
+      const id = button.dataset.maskGdsLayerToggle.replace('/', '-');
+      const group = document.getElementById(`mask-gds-layer-${id}`);
+      if (group) group.style.display = visible ? '' : 'none';
+      button.setAttribute('aria-pressed', String(visible));
+    });
+  }
+
+  fitGdsPreview() {
+    if (!this.gdsPreview?.bounds) return;
+    const { minX, minY, maxX, maxY } = this.gdsPreview.bounds;
+    const width = Math.max(maxX - minX, 1);
+    const height = Math.max(maxY - minY, 1);
+    const pad = Math.max(width, height) * 0.04;
+    this.gdsViewBox = [minX - pad, -maxY - pad, width + pad * 2, height + pad * 2];
+    this.setGdsSvgViewBox();
+  }
+
+  zoomGdsPreview(factor) {
+    if (!this.gdsViewBox) return;
+    const [x, y, width, height] = this.gdsViewBox;
+    const baseWidth = Math.max(this.gdsPreview.width, 1);
+    const minWidth = baseWidth / 4096;
+    const nextWidth = Math.max(minWidth, Math.min(baseWidth * 2, width * factor));
+    const nextHeight = height * (nextWidth / width);
+    const centerX = x + width / 2, centerY = y + height / 2;
+    this.gdsViewBox = [centerX - nextWidth / 2, centerY - nextHeight / 2, nextWidth, nextHeight];
+    this.setGdsSvgViewBox();
+  }
+
   autoFillFromChipDesign() {
     if (this.technologyId !== 'generic') {
       this.setStatus('Chip Lab schematic rasterization is only available in the Educational profile; it does not generate a PDK layout.');
@@ -692,6 +877,10 @@ export class MaskLabPanel {
     }
     const physicalLayout = chipLab.normalizePhysicalLayout?.(chipLab.physicalLayout) || null;
     const usesPhysicalLayout = Boolean(physicalLayout && nodes.every((node) => physicalLayout.placements?.[node.id]));
+    // Start on ACTIVE so a newly generated layout is visible even when the
+    // design has no routed wires yet (in which case METAL 1 is legitimately empty).
+    this.activeLayerId = 'active';
+    this.setCurrentLayerMask(this.layerMasks.active);
     if (usesPhysicalLayout) {
       const activeMask = this.createMask(this.gridWidth, this.gridHeight);
       const gateMask = this.createMask(this.gridWidth, this.gridHeight);
@@ -742,8 +931,7 @@ export class MaskLabPanel {
       this.layerMasks.active = activeMask;
       this.layerMasks.gate = gateMask;
       this.layerMasks.metal1 = metalMask;
-      this.activeLayerId = 'metal1';
-      this.setCurrentLayerMask(metalMask);
+      this.setCurrentLayerMask(activeMask);
     } else {
     const geometry = nodes.map((node) => ({
       node,

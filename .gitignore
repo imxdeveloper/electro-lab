@@ -3,5 +3,6 @@ dist/
 .vite/
 /test-results/
 /playwright-report/
+/debug.log
 .DS_Store
 Thumbs.db

@@ -1,5 +1,13 @@
 import { MASK_TECHNOLOGIES } from '../data/MaskTechnologyProfiles.js';
 
+export function getPhysicalDesignTestGate({ steps = [], testedVerilog = null, currentVerilog = '' }) {
+  if (!steps.length) return 'Add at least one test vector in Test Lab before running OpenLane.';
+  const failed = steps.filter((step) => step.result !== true).length;
+  if (failed) return `${failed} test vector${failed === 1 ? '' : 's'} have not passed. Fix the design and run Test Lab again before OpenLane.`;
+  if (!testedVerilog || testedVerilog !== currentVerilog) return 'The design changed since its last passing test run. Run Test Lab again before OpenLane.';
+  return null;
+}
+
 const GATES = {
   AND: { inputs: 2, description: 'High only when every input is high.' },
   OR: { inputs: 2, description: 'High when one or more inputs are high.' },
@@ -80,6 +88,7 @@ export class ChipLabPanel {
     this.customChips = this.loadCustomChips();
     this.designId = `design-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     this.testBench = { name: 'Untitled test bench', steps: [] };
+    this.lastTestedVerilog = null;
     this.trace = [];
     this.clockPeriod = 1000;
     this.clockTimer = null;
@@ -295,11 +304,11 @@ export class ChipLabPanel {
       </div>
       <div class="chip-mask-setup-modal" data-chip-asic-modal hidden>
         <section role="dialog" aria-modal="true" aria-labelledby="chip-asic-title">
-          <header><div><strong id="chip-asic-title">Local EDA setup</strong><span>Check which physical-design tools are available before wiring the in-app run flow.</span></div><button type="button" data-chip-action="close-asic-flow" aria-label="Close">×</button></header>
+          <header><div><strong id="chip-asic-title">Run physical design</strong><span>Generate a PDK layout from this Chip Lab design without downloading Verilog.</span></div><button type="button" data-chip-action="close-asic-flow" aria-label="Close">×</button></header>
           <label>PDK<select data-chip-asic-pdk><option value="sky130A">SkyWater SKY130A</option><option value="sky130B">SkyWater SKY130B</option><option value="gf180mcuD">GF180MCU D</option></select></label>
           <div class="chip-mask-profile-summary" data-chip-asic-status aria-live="polite">Checking local EDA tools…</div>
-          <p class="chip-mask-profile-warning">This first step only detects tools. It does not run synthesis, placement, routing, DRC/LVS, or make GDS. The next step is connecting an OpenLane runner and returning its verified artifacts here.</p>
-          <footer><button type="button" data-chip-action="close-asic-flow">Close</button><button type="button" class="chip-primary" data-chip-action="run-asic-flow">Refresh tool check</button></footer>
+          <p class="chip-mask-profile-warning">OpenLane runs synthesis, floorplanning, placement, routing, and its configured verification steps. Review the PDK-specific reports; a completed flow is not foundry signoff.</p>
+          <footer><button type="button" data-chip-action="close-asic-flow">Close</button><button type="button" class="chip-primary" data-chip-action="run-asic-flow">Run OpenLane</button></footer>
         </section>
       </div>
     `;
@@ -619,6 +628,7 @@ export class ChipLabPanel {
     if (action === 'close-asic-flow') this.el.querySelector('[data-chip-asic-modal]').hidden = true;
     if (action === 'run-asic-flow') this.startAsicFlow();
     if (action === 'open-asic-gds') this.openAsicGds();
+    if (action === 'open-asic-mask') this.openAsicMaskLayers();
     if (action === 'close-mask-setup') this.el.querySelector('[data-chip-mask-setup-modal]').hidden = true;
     if (action === 'confirm-mask-setup') this.generateMaskForSelectedProfile();
     if (action === 'new') {
@@ -1102,6 +1112,16 @@ export class ChipLabPanel {
     try { verilog = this.exportVerilog(); }
     catch (error) { this.setStatus(`Cannot prepare RTL: ${error.message}`); return; }
     if (!verilog) return;
+    const testGate = getPhysicalDesignTestGate({
+      steps: this.testBench.steps,
+      testedVerilog: this.lastTestedVerilog,
+      currentVerilog: verilog
+    });
+    if (testGate) {
+      status.textContent = testGate;
+      this.openTestBench();
+      return;
+    }
     button.disabled = true;
     status.textContent = 'Preparing an in-memory RTL handoff and starting OpenLane…';
     output.hidden = true;
@@ -1161,6 +1181,14 @@ export class ChipLabPanel {
       const results = document.createElement('div');
       results.dataset.asicResults = '';
       results.innerHTML = `${gds ? '<button type="button" class="chip-primary" data-chip-action="open-asic-gds">Open generated GDS in Chip View</button>' : ''}${reports.length ? `<div class="chip-asic-artifacts"><strong>FLOW REPORTS · ${reports.length}</strong>${reports.map((artifact) => `<a href="${escapeHTML(artifact.url)}" download="${escapeHTML(artifact.name)}">${escapeHTML(artifact.name)}</a>`).join('')}</div>` : ''}`;
+      if (gds) {
+        const maskButton = document.createElement('button');
+        maskButton.type = 'button';
+        maskButton.className = 'chip-primary';
+        maskButton.dataset.chipAction = 'open-asic-mask';
+        maskButton.textContent = 'View GDS layers in Mask Lab';
+        results.querySelector('[data-chip-action="open-asic-gds"]')?.after(maskButton);
+      }
       output.prepend(results);
       if (job.status === 'failed') output.querySelector('.chip-asic-log')?.setAttribute('open', '');
     }
@@ -1184,6 +1212,24 @@ export class ChipLabPanel {
       this.el.querySelector('[data-chip-asic-modal]').hidden = true;
     } catch (error) {
       status.textContent = `GDS was generated, but Chip View could not load it: ${error.message}`;
+    }
+  }
+
+  async openAsicMaskLayers() {
+    const artifact = this.latestAsicGds;
+    if (!artifact) return;
+    const status = this.el.querySelector('[data-chip-asic-status]');
+    status.textContent = 'Loading generated GDS layers into Mask Lab…';
+    try {
+      const response = await fetch(artifact.url);
+      if (!response.ok) throw new Error(`Could not download GDS (${response.status}).`);
+      const buffer = await response.arrayBuffer();
+      await this.editor.setWorkspaceMode('masks');
+      if (!this.editor.maskLabPanel) throw new Error('Mask Lab did not open.');
+      this.editor.maskLabPanel.importGdsLayers(buffer, artifact.name);
+      this.el.querySelector('[data-chip-asic-modal]').hidden = true;
+    } catch (error) {
+      status.textContent = `GDS was generated, but Mask Lab could not display it: ${error.message}`;
     }
   }
 
@@ -2789,6 +2835,8 @@ export class ChipLabPanel {
     }
     savedInputs.forEach(([node, value]) => { node.value = value; });
     savedStates.forEach(([node, state]) => Object.assign(node, state));
+    try { this.lastTestedVerilog = passed === this.testBench.steps.length ? this.exportVerilog() : null; }
+    catch { this.lastTestedVerilog = null; }
     this.persistTestBenches();
     this.runSimulation();
     this.renderTestBenchSteps();
