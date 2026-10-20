@@ -25,7 +25,7 @@ A browser-based 3D workspace for exploring atoms and molecules, building circuit
 
 ## 🧩 Mask Lab
 
-Chip Lab's **EDA Setup** checks whether common local ASIC tools are on `PATH` while running the Vite development server. It currently reports availability only; it does not launch OpenLane or create a physical layout. Verilog export remains a separate, explicit download. The next integration step is a local OpenLane job runner that accepts the in-memory RTL and selected PDK, then returns logs, DRC/LVS results, and GDS to Chip View.
+Chip Lab's **Run ASIC Flow** submits generated RTL in memory to the local OpenLane 2 CLI, or to the configured OpenLane 2 Docker image when only Docker is installed. It creates a separate job directory, maps the physical die envelope from mm to the PDK's µm units, runs the Classic flow for SKY130A, SKY130B, or GF180MCU D, and returns logs, generated reports, and GDS. A completed flow is not foundry signoff. On Windows, OpenLane 2 uses WSL 2 and Docker Desktop; the Docker daemon and PDK download must be available to the app process. The explicit **Export Verilog** action remains available for source handoff.
 
 Mask Lab provides separate SKY130, GF180MCU, and process-agnostic educational profiles, each with independent editable layer masks. The 10 nm × 10 nm grid is an editor display raster, not a PDK manufacturing grid.
 

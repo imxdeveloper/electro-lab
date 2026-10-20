@@ -427,7 +427,15 @@ export function flattenStructure(parsed, topName = null, options = {}) {
   while (queue.length) {
     const { structure, transform, path, instanceId, chain } = queue.shift();
 
-    for (const element of structure.elements) {
+    // Preserve geometry from this structure even when a large top-level
+    // reference list (for example OpenLane filler cells) reaches the cap.
+    const orderedElements = [
+      ...structure.elements.filter((element) => element.type !== 'SREF' && element.type !== 'AREF'),
+      ...structure.elements
+        .filter((element) => element.type === 'SREF' || element.type === 'AREF')
+        .sort((a, b) => referencePriority(a) - referencePriority(b))
+    ];
+    for (const element of orderedElements) {
       if (element.type === 'SREF' || element.type === 'AREF') {
         const child = byName.get(element.sname);
         // Skip only genuine cycles; the same cell placed many times is normal.
@@ -436,7 +444,7 @@ export function flattenStructure(parsed, topName = null, options = {}) {
         const placements = element.type === 'AREF' ? arrayPlacements(element) : [[0, 0]];
         for (const [offsetX, offsetY] of placements) {
           if (instances.length >= maxInstances) {
-            truncatedAt = instances.length;
+            truncatedAt ??= instances.length;
             break;
           }
           const childTransform = referenceTransform(element, origin[0], origin[1], offsetX, offsetY);
@@ -469,15 +477,19 @@ export function flattenStructure(parsed, topName = null, options = {}) {
           });
           queue.push({ structure: child, transform: childTransform, path: child.name, instanceId: id, chain: [...chain, child.name] });
         }
-        if (truncatedAt !== null) break;
       } else if (element.points.length) {
         pushElement(element, transform, path, instanceId);
       }
     }
-    if (truncatedAt !== null) break;
   }
 
   return { elements, instances, texts, topName: top.name, truncatedAt };
+}
+
+function referencePriority(element) {
+  // Standard-cell filler, tap, and decap rows can account for nearly every
+  // instance in a chip. Keep functional cells ahead of these when capped.
+  return /(?:fill|tap|decap)/i.test(element.sname ?? '') ? 1 : 0;
 }
 
 function arrayPlacements(element) {

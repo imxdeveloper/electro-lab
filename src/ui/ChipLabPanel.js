@@ -83,6 +83,9 @@ export class ChipLabPanel {
     this.trace = [];
     this.clockPeriod = 1000;
     this.clockTimer = null;
+    this.asicJobId = null;
+    this.asicJob = null;
+    this.asicPollTimer = null;
     this.clockHigh = false;
     this.clockEdgeCount = 0;
     this.clockEdgeLog = [];
@@ -114,7 +117,7 @@ export class ChipLabPanel {
           <button type="button" data-chip-action="import">Import</button>
           <button type="button" data-chip-action="import-hdl">Import Verilog</button>
           <button type="button" data-chip-action="export-hdl">Export Verilog</button>
-          <button type="button" data-chip-action="asic-flow" class="chip-primary">EDA Setup</button>
+          <button type="button" data-chip-action="asic-flow" class="chip-primary">Run ASIC Flow</button>
           <button type="button" data-chip-action="generate-mask">Generate Mask</button>
           <button type="button" data-chip-action="open-testbench">Test Lab</button>
           <button type="button" data-chip-action="export" class="chip-primary">Export design</button>
@@ -614,7 +617,8 @@ export class ChipLabPanel {
     if (action === 'generate-mask') this.openMaskSetup();
     if (action === 'asic-flow') this.openAsicFlow();
     if (action === 'close-asic-flow') this.el.querySelector('[data-chip-asic-modal]').hidden = true;
-    if (action === 'run-asic-flow') this.checkAsicRunner();
+    if (action === 'run-asic-flow') this.startAsicFlow();
+    if (action === 'open-asic-gds') this.openAsicGds();
     if (action === 'close-mask-setup') this.el.querySelector('[data-chip-mask-setup-modal]').hidden = true;
     if (action === 'confirm-mask-setup') this.generateMaskForSelectedProfile();
     if (action === 'new') {
@@ -1047,7 +1051,17 @@ export class ChipLabPanel {
   async openAsicFlow() {
     const modal = this.el.querySelector('[data-chip-asic-modal]');
     modal.hidden = false;
-    this.el.querySelector('[data-chip-asic-status]').textContent = 'Checking local EDA tool availability…';
+    this.el.querySelector('[data-chip-action="asic-flow"]').textContent = 'Run ASIC Flow';
+    modal.querySelector('#chip-asic-title').textContent = 'Run physical design';
+    modal.querySelector('header span').textContent = 'Generate a PDK layout from the current Chip Lab design without downloading Verilog.';
+    modal.querySelector('.chip-mask-profile-warning').textContent = 'OpenLane runs synthesis, floorplanning, placement, routing, and its configured verification steps. Review the PDK-specific reports; a completed flow is not foundry signoff.';
+    modal.querySelector('[data-chip-action="run-asic-flow"]').textContent = 'Run OpenLane';
+    let output = modal.querySelector('[data-chip-asic-output]');
+    if (!output) {
+      output = document.createElement('div');
+      output.dataset.chipAsicOutput = '';
+      this.el.querySelector('[data-chip-asic-status]').after(output);
+    }
     await this.checkAsicRunner();
   }
 
@@ -1059,14 +1073,117 @@ export class ChipLabPanel {
       const response = await fetch('/api/eda/status', { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`Local app server returned ${response.status}.`);
       const result = await response.json();
-      const available = result.tools?.filter((tool) => tool.available).map((tool) => tool.name) || [];
-      const missing = result.tools?.filter((tool) => !tool.available).map((tool) => tool.name) || [];
-      status.textContent = `Tool check only · detected: ${available.join(', ') || 'none'} · not found: ${missing.join(', ') || 'none'}. No RTL was exported and no physical run was started.`;
+      const available = Object.entries(result.tools || {}).filter(([, location]) => location).map(([name]) => name);
+      const runnerText = result.runner?.mode === 'Docker image'
+        ? `Docker runner ready with ${result.runner.image}.`
+        : result.runnerReady ? `OpenLane CLI ready at ${result.runner.path}.` : 'OpenLane CLI or Docker is not available on PATH.';
+      status.textContent = `${runnerText} Detected tools: ${available.join(', ') || 'none'}. PDK root: ${result.pdkRoot || 'OpenLane default'}.`;
+      button.disabled = !result.runnerReady;
+      button.title = result.runnerReady ? '' : 'Install OpenLane 2 or Docker, then restart the app.';
+      this.asicRunnerReady = result.runnerReady;
+      this.el.querySelector('[data-chip-asic-output]').hidden = true;
     } catch (error) {
-      status.textContent = `Could not reach the local EDA status service (${error.message}). Start Chip Lab with “npm run dev” to use its local runner connection.`;
+      status.textContent = `Could not reach the local EDA runner (${error.message}). Start the app with “npm run dev”.`;
+      button.disabled = true;
     } finally {
+      button.textContent = 'Run OpenLane';
+    }
+  }
+
+  async startAsicFlow() {
+    const status = this.el.querySelector('[data-chip-asic-status]');
+    const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
+    const output = this.el.querySelector('[data-chip-asic-output]');
+    if (!this.asicRunnerReady) {
+      status.textContent = 'No runner is available. Install OpenLane 2 or Docker, restart the app, then try again.';
+      return;
+    }
+    let verilog;
+    try { verilog = this.exportVerilog(); }
+    catch (error) { this.setStatus(`Cannot prepare RTL: ${error.message}`); return; }
+    if (!verilog) return;
+    button.disabled = true;
+    status.textContent = 'Preparing an in-memory RTL handoff and starting OpenLane…';
+    output.hidden = true;
+    output.replaceChildren();
+    try {
+      const response = await fetch('/api/eda/jobs', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          verilog, pdk: this.el.querySelector('[data-chip-asic-pdk]').value,
+          widthMm: this.physicalLayout.widthMm, heightMm: this.physicalLayout.heightMm
+        })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || `Runner returned ${response.status}.`);
+      this.asicJobId = result.id;
+      this.asicJob = result;
+      this.renderAsicJob(result);
+      this.pollAsicJob();
+    } catch (error) {
+      status.textContent = `Could not start the physical-design flow: ${error.message}`;
       button.disabled = false;
-      button.textContent = 'Check runner';
+    }
+  }
+
+  async pollAsicJob() {
+    if (!this.asicJobId) return;
+    try {
+      const response = await fetch(`/api/eda/jobs/${this.asicJobId}`, { headers: { Accept: 'application/json' } });
+      const job = await response.json();
+      if (!response.ok) throw new Error(job.error || `Runner returned ${response.status}.`);
+      this.asicJob = job;
+      this.renderAsicJob(job);
+      if (job.status === 'queued' || job.status === 'running') {
+        this.asicPollTimer = window.setTimeout(() => this.pollAsicJob(), 2000);
+      }
+    } catch (error) {
+      this.el.querySelector('[data-chip-asic-status]').textContent = `Lost contact with the running job: ${error.message}. The server may have restarted.`;
+    }
+  }
+
+  renderAsicJob(job) {
+    const status = this.el.querySelector('[data-chip-asic-status]');
+    const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
+    const output = this.el.querySelector('[data-chip-asic-output]');
+    status.textContent = `${job.designName} · ${job.pdk} · ${job.status}${job.error ? ` · ${job.error}` : ''}`;
+    button.disabled = job.status === 'running' || job.status === 'queued';
+    button.textContent = job.status === 'running' || job.status === 'queued' ? 'Flow running…' : 'Run again';
+    output.hidden = false;
+    const gds = job.artifacts?.find((artifact) => artifact.kind === 'gds');
+    const reports = (job.artifacts || []).filter((artifact) => artifact.kind === 'report');
+    let log = output.querySelector('[data-chip-asic-log]');
+    if (!log) {
+      output.innerHTML = '<details class="chip-asic-log"><summary>OpenLane live log</summary><pre data-chip-asic-log></pre></details>';
+      log = output.querySelector('[data-chip-asic-log]');
+    }
+    if ((job.status === 'failed' || job.status === 'succeeded') && !output.querySelector('[data-asic-results]')) {
+      const results = document.createElement('div');
+      results.dataset.asicResults = '';
+      results.innerHTML = `${gds ? '<button type="button" class="chip-primary" data-chip-action="open-asic-gds">Open generated GDS in Chip View</button>' : ''}${reports.length ? `<div class="chip-asic-artifacts"><strong>FLOW REPORTS · ${reports.length}</strong>${reports.map((artifact) => `<a href="${escapeHTML(artifact.url)}" download="${escapeHTML(artifact.name)}">${escapeHTML(artifact.name)}</a>`).join('')}</div>` : ''}`;
+      output.prepend(results);
+      if (job.status === 'failed') output.querySelector('.chip-asic-log')?.setAttribute('open', '');
+    }
+    log.textContent = job.log || 'Waiting for OpenLane output…';
+    if (gds && job.status === 'succeeded') this.latestAsicGds = gds;
+  }
+
+  async openAsicGds() {
+    const artifact = this.latestAsicGds;
+    if (!artifact) return;
+    const status = this.el.querySelector('[data-chip-asic-status]');
+    status.textContent = 'Loading the generated GDS into Chip View…';
+    try {
+      const response = await fetch(artifact.url);
+      if (!response.ok) throw new Error(`Could not download GDS (${response.status}).`);
+      const blob = await response.blob();
+      const file = new File([blob], artifact.name, { type: 'application/octet-stream' });
+      await this.editor.setWorkspaceMode('chipview');
+      if (!this.editor.chipViewPanel) throw new Error('Chip View did not open.');
+      await this.editor.chipViewPanel.handleFiles([file]);
+      this.el.querySelector('[data-chip-asic-modal]').hidden = true;
+    } catch (error) {
+      status.textContent = `GDS was generated, but Chip View could not load it: ${error.message}`;
     }
   }
 
@@ -2906,13 +3023,18 @@ export class ChipLabPanel {
 
   setViewMode(mode) {
     this.viewMode = mode === 'physical' ? 'physical' : 'logic';
-    this.el.querySelector('[data-chip-logic-view]').hidden = this.viewMode !== 'logic';
-    this.el.querySelector('[data-chip-physical-view]').hidden = this.viewMode !== 'physical';
-    this.el.querySelector('[data-chip-action="logic-view"]').classList.toggle('active', this.viewMode === 'logic');
-    this.el.querySelector('[data-chip-action="physical-view"]').classList.toggle('active', this.viewMode === 'physical');
-    this.el.querySelector('[data-chip-action="logic-view"]').setAttribute('aria-pressed', String(this.viewMode === 'logic'));
-    this.el.querySelector('[data-chip-action="physical-view"]').setAttribute('aria-pressed', String(this.viewMode === 'physical'));
-    this.el.querySelector('[data-chip-grid-label]').textContent = this.viewMode === 'logic' ? 'GRID 20 px' : 'DIE PLACEMENT';
+    const logicView = this.el.querySelector('[data-chip-logic-view]');
+    const physicalView = this.el.querySelector('[data-chip-physical-view]');
+    const logicButton = this.el.querySelector('[data-chip-action="logic-view"]');
+    const physicalButton = this.el.querySelector('[data-chip-action="physical-view"]');
+    if (logicView) logicView.hidden = this.viewMode !== 'logic';
+    if (physicalView) physicalView.hidden = this.viewMode !== 'physical';
+    logicButton?.classList.toggle('active', this.viewMode === 'logic');
+    physicalButton?.classList.toggle('active', this.viewMode === 'physical');
+    logicButton?.setAttribute('aria-pressed', String(this.viewMode === 'logic'));
+    physicalButton?.setAttribute('aria-pressed', String(this.viewMode === 'physical'));
+    const gridLabel = this.el.querySelector('[data-chip-grid-label]');
+    if (gridLabel) gridLabel.textContent = this.viewMode === 'logic' ? 'GRID 20 px' : 'DIE PLACEMENT';
     this.renderPhysicalCanvas();
     if (this.viewMode === 'physical') this.setStatus('Drag conceptual cells to arrange the placement preview.');
   }

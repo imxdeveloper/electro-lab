@@ -247,6 +247,23 @@ test('flattening places referenced cells instead of stacking them at the origin'
   assert.ok(Math.max(...xs) > 5000, 'the second copy is placed, not left at the origin');
 });
 
+test('flattening keeps top geometry and prioritizes functional cells over filler references', () => {
+  const box = (x) => ({ type: 'BOUNDARY', layer: 68, datatype: 20, points: [[x, 0], [x + 10, 0], [x + 10, 10], [x, 0]] });
+  const ref = (sname, x) => ({ type: 'SREF', sname, points: [[x, 0]] });
+  const parsed = { structures: [
+    { name: 'TOP', elements: [ref('sky130_fd_sc_hd__fill_1', 100), box(0), ref('sky130_fd_sc_hd__and2_1', 200)] },
+    { name: 'sky130_fd_sc_hd__fill_1', elements: [box(1)] },
+    { name: 'sky130_fd_sc_hd__and2_1', elements: [box(2)] }
+  ] };
+
+  const flat = flattenStructure(parsed, 'TOP', { maxInstances: 1 });
+  assert.equal(flat.truncatedAt, 1);
+  assert.equal(flat.instances[0].name, 'sky130_fd_sc_hd__and2_1');
+  assert.ok(flat.elements.some((element) => element.structure === 'TOP'), 'root geometry survives reference truncation');
+  assert.ok(flat.elements.some((element) => element.structure === 'sky130_fd_sc_hd__and2_1'), 'functional cell geometry is expanded');
+  assert.ok(!flat.elements.some((element) => element.structure === 'sky130_fd_sc_hd__fill_1'));
+});
+
 test('mirrored references flip the cell about its placement point', () => {
   const parsed = parseGdsii(createTwoCellGds());
   const flat = flattenStructure(parsed);
