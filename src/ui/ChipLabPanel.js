@@ -189,13 +189,20 @@ export class ChipLabPanel {
             <button class="chip-create-subcircuit" data-chip-action="create-subcircuit">Create from selection</button>
           </div>
           <div class="chip-library-group">
-            <h3>Reference designs</h3>
-            <button data-chip-preset="half-adder"><i class="chip-gate-icon preset">Σ</i><span><b>Half adder</b><small>Sum and carry outputs</small></span><span class="chip-add-mark">↗</span></button>
-            <button data-chip-preset="full-adder"><i class="chip-gate-icon preset">∑</i><span><b>Full adder</b><small>Three-input addition</small></span><span class="chip-add-mark">↗</span></button>
-            <button data-chip-preset="counter"><i class="chip-gate-icon clock">CNT</i><span><b>Enabled counter</b><small>4-bit clocked counter with reset</small></span><span class="chip-add-mark">↗</span></button>
-            <button data-chip-preset="traffic-light"><i class="chip-gate-icon clock">FSM</i><span><b>Traffic light FSM</b><small>One-hot three-state controller</small></span><span class="chip-add-mark">↗</span></button>
-            <button data-chip-preset="accumulator"><i class="chip-gate-icon preset">Σ+</i><span><b>4-bit accumulator</b><small>Clocked running sum</small></span><span class="chip-add-mark">↗</span></button>
-            <button data-chip-preset="ram-demo"><i class="chip-gate-icon clock">RAM</i><span><b>RAM read/write</b><small>4 × 4 synchronous memory</small></span><span class="chip-add-mark">↗</span></button>
+            <h3>Design library <small data-preset-count>9 examples</small></h3>
+            <div class="chip-preset-filters"><input type="search" data-preset-search placeholder="Find an example…" aria-label="Search design examples"><select data-preset-category aria-label="Filter examples by type"><option value="all">All types</option><option value="combinational">Combinational</option><option value="sequential">Sequential</option><option value="memory">Memory</option></select></div>
+            <div data-preset-list>
+              <button data-chip-preset="half-adder" data-preset-category="combinational"><i class="chip-gate-icon preset">Σ</i><span><b>Half adder</b><small>Two bits in · sum and carry out</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="full-adder" data-preset-category="combinational"><i class="chip-gate-icon preset">∑</i><span><b>Full adder</b><small>Add A, B, and carry-in</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="mux-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">MUX</i><span><b>4-bit bus selector</b><small>SELECT chooses A or B</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="comparator-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">A≷B</i><span><b>Magnitude comparator</b><small>Greater · equal · less outputs</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="alu-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">ALU</i><span><b>Mini 4-bit ALU</b><small>OP chooses addition or XOR</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="counter" data-preset-category="sequential"><i class="chip-gate-icon clock">CNT</i><span><b>Enabled counter</b><small>4-bit count · enable and reset</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="traffic-light" data-preset-category="sequential"><i class="chip-gate-icon clock">FSM</i><span><b>Traffic light FSM</b><small>Three states advance on clock</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="accumulator" data-preset-category="sequential"><i class="chip-gate-icon preset">Σ+</i><span><b>4-bit accumulator</b><small>Add input on each clock edge</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="ram-demo" data-preset-category="memory"><i class="chip-gate-icon clock">RAM</i><span><b>RAM read/write</b><small>Four 4-bit words · synchronous write</small></span><span class="chip-add-mark">↗</span></button>
+            </div>
+            <p class="chip-preset-empty" data-preset-empty hidden>No examples match. Try another search or type.</p>
             <button data-chip-action="open-fsm-builder"><i class="chip-gate-icon clock">FSM+</i><span><b>Build a state machine</b><small>Define states and transitions</small></span><span class="chip-add-mark">↗</span></button>
           </div>
           <div class="chip-library-foot"><span class="chip-led"></span> Mixed combinational / clocked logic</div>
@@ -306,7 +313,7 @@ export class ChipLabPanel {
         <section role="dialog" aria-modal="true" aria-labelledby="chip-asic-title">
           <header><div><strong id="chip-asic-title">Run physical design</strong><span>Generate a PDK layout from this Chip Lab design without downloading Verilog.</span></div><button type="button" data-chip-action="close-asic-flow" aria-label="Close">×</button></header>
           <label>PDK<select data-chip-asic-pdk><option value="sky130A">SkyWater SKY130A</option><option value="sky130B">SkyWater SKY130B</option><option value="gf180mcuD">GF180MCU D</option></select></label>
-          <div class="chip-mask-profile-summary" data-chip-asic-status aria-live="polite">Checking local EDA tools…</div>
+          <div class="chip-mask-profile-summary chip-asic-status" data-chip-asic-status data-job-state="idle" role="status" aria-live="polite">Checking local EDA tools…</div>
           <p class="chip-mask-profile-warning">OpenLane runs synthesis, floorplanning, placement, routing, and its configured verification steps. Review the PDK-specific reports; a completed flow is not foundry signoff.</p>
           <footer><button type="button" data-chip-action="close-asic-flow">Close</button><button type="button" class="chip-primary" data-chip-action="run-asic-flow">Run OpenLane</button></footer>
         </section>
@@ -380,6 +387,7 @@ export class ChipLabPanel {
     });
     this.el.addEventListener('input', (event) => {
       if (event.target.matches('[data-chip-find]')) this.renderFindResults(event.target.value);
+      if (event.target.matches('[data-preset-search]')) this.filterPresetLibrary();
       if (event.target.matches('[data-chip-name]')) {
         this.chipName = event.target.value.trim() || 'Untitled Logic Chip';
         this.el.querySelector('[data-chip-title]').textContent = this.chipName;
@@ -412,6 +420,7 @@ export class ChipLabPanel {
       }
     });
     this.el.addEventListener('change', (event) => {
+      if (event.target.matches('[data-preset-category]')) this.filterPresetLibrary();
       if (event.target.matches('[data-chip-die-width],[data-chip-die-height]')) this.updatePhysicalLayout(event.target);
       if (event.target.matches('[data-chip-label]')) this.renderInspector();
       if (event.target.matches('[data-wire-route]')) {
@@ -1073,30 +1082,42 @@ export class ChipLabPanel {
       this.el.querySelector('[data-chip-asic-status]').after(output);
     }
     await this.checkAsicRunner();
+    if (this.asicJobId) {
+      window.clearTimeout(this.asicPollTimer);
+      await this.pollAsicJob();
+    }
   }
 
   async checkAsicRunner() {
     const status = this.el.querySelector('[data-chip-asic-status]');
     const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
     button.disabled = true;
+    button.textContent = 'Checking runner…';
     try {
       const response = await fetch('/api/eda/status', { headers: { Accept: 'application/json' } });
       if (!response.ok) throw new Error(`Local app server returned ${response.status}.`);
       const result = await response.json();
       const available = Object.entries(result.tools || {}).filter(([, location]) => location).map(([name]) => name);
       const runnerText = result.runner?.mode === 'Docker image'
-        ? `Docker runner ready with ${result.runner.image}.`
+        ? result.dockerReady
+          ? `Docker runner ready with ${result.runner.image}.`
+          : result.dockerError || 'Docker Desktop is installed, but its engine is unavailable to this app process.'
         : result.runnerReady ? `OpenLane CLI ready at ${result.runner.path}.` : 'OpenLane CLI or Docker is not available on PATH.';
-      status.textContent = `${runnerText} Detected tools: ${available.join(', ') || 'none'}. PDK root: ${result.pdkRoot || 'OpenLane default'}.`;
-      button.disabled = !result.runnerReady;
-      button.title = result.runnerReady ? '' : 'Install OpenLane 2 or Docker, then restart the app.';
+      status.textContent = result.dockerReady === false
+        ? `${runnerText} Detected tools: ${available.join(', ') || 'none'}.`
+        : `${runnerText} Detected tools: ${available.join(', ') || 'none'}. PDK root: ${result.pdkRoot || 'OpenLane default'}.`;
+      button.disabled = false;
+      button.title = result.runnerReady ? '' : result.dockerError || 'Install OpenLane 2 or Docker, then restart the app.';
+      button.textContent = result.runnerReady ? 'Run OpenLane' : result.runner?.mode === 'Docker image' ? 'Retry Docker connection' : 'Check for runner';
       this.asicRunnerReady = result.runnerReady;
       this.el.querySelector('[data-chip-asic-output]').hidden = true;
     } catch (error) {
       status.textContent = `Could not reach the local EDA runner (${error.message}). Start the app with “npm run dev”.`;
-      button.disabled = true;
+      button.disabled = false;
+      button.title = 'Retry the local EDA runner check.';
+      button.textContent = 'Retry runner check';
     } finally {
-      button.textContent = 'Run OpenLane';
+      button.disabled = false;
     }
   }
 
@@ -1105,13 +1126,26 @@ export class ChipLabPanel {
     const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
     const output = this.el.querySelector('[data-chip-asic-output]');
     if (!this.asicRunnerReady) {
-      status.textContent = 'No runner is available. Install OpenLane 2 or Docker, restart the app, then try again.';
+      await this.checkAsicRunner();
       return;
     }
+    const appStatus = this.el.querySelector('[data-chip-status]');
+    const previousAppStatus = appStatus?.textContent || '';
     let verilog;
     try { verilog = this.exportVerilog(); }
-    catch (error) { this.setStatus(`Cannot prepare RTL: ${error.message}`); return; }
-    if (!verilog) return;
+    catch (error) {
+      status.dataset.jobState = 'failed';
+      status.textContent = `Cannot prepare RTL for OpenLane: ${error.message}`;
+      return;
+    }
+    if (!verilog) {
+      status.dataset.jobState = 'failed';
+      const exporterReason = appStatus?.textContent?.trim();
+      status.textContent = exporterReason && exporterReason !== previousAppStatus
+        ? exporterReason
+        : 'No Verilog was generated. Add supported input and gate components, connect them to an output pin, then try again.';
+      return;
+    }
     const testGate = getPhysicalDesignTestGate({
       steps: this.testBench.steps,
       testedVerilog: this.lastTestedVerilog,
@@ -1119,10 +1153,14 @@ export class ChipLabPanel {
     });
     if (testGate) {
       status.textContent = testGate;
+      this.el.querySelector('[data-chip-asic-modal]').hidden = true;
       this.openTestBench();
+      const testBenchResult = this.el.querySelector('[data-testbench-result]');
+      if (testBenchResult) testBenchResult.textContent = `${testGate} Run and pass the current design’s vectors, then reopen Run ASIC Flow.`;
       return;
     }
     button.disabled = true;
+    status.dataset.jobState = 'queued';
     status.textContent = 'Preparing an in-memory RTL handoff and starting OpenLane…';
     output.hidden = true;
     output.replaceChildren();
@@ -1141,6 +1179,7 @@ export class ChipLabPanel {
       this.renderAsicJob(result);
       this.pollAsicJob();
     } catch (error) {
+      status.dataset.jobState = 'failed';
       status.textContent = `Could not start the physical-design flow: ${error.message}`;
       button.disabled = false;
     }
@@ -1158,7 +1197,9 @@ export class ChipLabPanel {
         this.asicPollTimer = window.setTimeout(() => this.pollAsicJob(), 2000);
       }
     } catch (error) {
-      this.el.querySelector('[data-chip-asic-status]').textContent = `Lost contact with the running job: ${error.message}. The server may have restarted.`;
+      const status = this.el.querySelector('[data-chip-asic-status]');
+      status.dataset.jobState = 'failed';
+      status.textContent = `Lost contact with the running job: ${error.message}. The server may have restarted.`;
     }
   }
 
@@ -1166,6 +1207,7 @@ export class ChipLabPanel {
     const status = this.el.querySelector('[data-chip-asic-status]');
     const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
     const output = this.el.querySelector('[data-chip-asic-output]');
+    status.dataset.jobState = job.status;
     status.textContent = `${job.designName} · ${job.pdk} · ${job.status}${job.error ? ` · ${job.error}` : ''}`;
     button.disabled = job.status === 'running' || job.status === 'queued';
     button.textContent = job.status === 'running' || job.status === 'queued' ? 'Flow running…' : 'Run again';
@@ -1659,6 +1701,7 @@ export class ChipLabPanel {
         'RED',
         'Traffic Light FSM'
       );
+      this.setStatus('Example loaded · Step the clock to move RED → GREEN → YELLOW → RED.');
       return;
     }
     if (preset === 'half-adder') {
@@ -1728,6 +1771,40 @@ export class ChipLabPanel {
       this.connect(clock, 0, ram, 3);
       this.connect(ram, 0, output, 0);
       this.chipName = 'Synchronous RAM Demo';
+    } else if (preset === 'mux-demo') {
+      const a = add('BUS_INPUT', 'A[3:0]', 80, 190, { width: 4, value: 5 });
+      const b = add('BUS_INPUT', 'B[3:0]', 80, 390, { width: 4, value: 10 });
+      const select = add('INPUT', 'SELECT', 360, 530);
+      const mux = add('MUX', '4-bit selector', 470, 270, { width: 4 });
+      const output = add('BUS_OUTPUT', 'Y[3:0]', 850, 270, { width: 4 });
+      this.connect(a, 0, mux, 0); this.connect(b, 0, mux, 1);
+      this.connect(select, 0, mux, 2); this.connect(mux, 0, output, 0);
+      this.chipName = '4-bit Bus Selector';
+    } else if (preset === 'comparator-demo') {
+      const a = add('BUS_INPUT', 'A[3:0]', 80, 220, { width: 4, value: 9 });
+      const b = add('BUS_INPUT', 'B[3:0]', 80, 430, { width: 4, value: 6 });
+      const compare = add('COMPARATOR', 'A compared with B', 450, 310, { width: 4 });
+      const greater = add('OUTPUT', 'A > B', 850, 200);
+      const equal = add('OUTPUT', 'A = B', 850, 330);
+      const less = add('OUTPUT', 'A < B', 850, 460);
+      this.connect(a, 0, compare, 0); this.connect(b, 0, compare, 1);
+      this.connect(compare, 0, greater, 0); this.connect(compare, 1, equal, 0); this.connect(compare, 2, less, 0);
+      this.chipName = '4-bit Magnitude Comparator';
+    } else if (preset === 'alu-demo') {
+      const a = add('BUS_INPUT', 'A[3:0]', 50, 150, { width: 4, value: 6 });
+      const b = add('BUS_INPUT', 'B[3:0]', 50, 450, { width: 4, value: 3 });
+      const operation = add('INPUT', 'OP · 0=ADD / 1=XOR', 350, 570);
+      const carryIn = add('CONST', 'CIN · 0', 350, 150, { value: false });
+      const adder = add('ADDER', 'ADD', 420, 230, { width: 4 });
+      const xor = add('BUS_XOR', 'XOR', 420, 430, { width: 4 });
+      const mux = add('MUX', 'Operation select', 720, 320, { width: 4 });
+      const result = add('BUS_OUTPUT', 'RESULT[3:0]', 1040, 280, { width: 4 });
+      const carry = add('OUTPUT', 'CARRY OUT', 1040, 420);
+      this.connect(a, 0, adder, 0); this.connect(b, 0, adder, 1); this.connect(carryIn, 0, adder, 2);
+      this.connect(a, 0, xor, 0); this.connect(b, 0, xor, 1);
+      this.connect(adder, 0, mux, 0); this.connect(xor, 0, mux, 1); this.connect(operation, 0, mux, 2);
+      this.connect(mux, 0, result, 0); this.connect(adder, 1, carry, 0);
+      this.chipName = 'Mini 4-bit ALU';
     }
     this.el.querySelector('[data-chip-name]').value = this.chipName;
     this.el.querySelector('[data-chip-title]').textContent = this.chipName;
@@ -1735,6 +1812,35 @@ export class ChipLabPanel {
     this.render();
     this.runSimulation();
     this.setTab('simulate');
+    const nextStep = {
+      'half-adder': 'Try all four A/B combinations, then run exhaustive vectors in Test Lab.',
+      'full-adder': 'Toggle carry-in and compare SUM/CARRY across all eight input combinations.',
+      'mux-demo': 'Toggle SELECT to switch the output between A and B.',
+      'comparator-demo': 'Change A and B in the inspector to exercise greater, equal, and less.',
+      'alu-demo': 'Toggle OP: LOW selects addition; HIGH selects bitwise XOR.',
+      counter: 'Set ENABLE and RESET, then step the clock to observe the count.',
+      'traffic-light': 'Step the clock to move RED → GREEN → YELLOW → RED.',
+      accumulator: 'Change ADDEND and step the clock to add it into the stored sum.',
+      'ram-demo': 'Set address and data, then clock a write before changing the address to read.'
+    }[preset];
+    if (nextStep) this.setStatus(`Example loaded · ${nextStep}`);
+  }
+
+  filterPresetLibrary() {
+    const search = this.el.querySelector('[data-preset-search]')?.value.trim().toLowerCase() || '';
+    const category = this.el.querySelector('[data-preset-category]')?.value || 'all';
+    const buttons = [...(this.el.querySelectorAll('[data-preset-list] [data-chip-preset]') || [])];
+    let visible = 0;
+    for (const button of buttons) {
+      const matches = (category === 'all' || button.dataset.presetCategory === category) &&
+        (!search || button.textContent.toLowerCase().includes(search));
+      button.hidden = !matches;
+      if (matches) visible += 1;
+    }
+    const count = this.el.querySelector('[data-preset-count]');
+    if (count) count.textContent = `${visible} of ${buttons.length}`;
+    const empty = this.el.querySelector('[data-preset-empty]');
+    if (empty) empty.hidden = visible > 0;
   }
 
   connect(source, outputIndex, target, inputIndex) {
@@ -3893,7 +3999,7 @@ export class ChipLabPanel {
   }
 
   exportVerilog() {
-    const allowed = new Set(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND',
+    const allowed = new Set(['INPUT', 'OUTPUT', 'CLOCK', 'BUS_INPUT', 'BUS_OUTPUT', 'CONST', 'BUS_CONST', 'VPLUS', 'GROUND',
       'AND', 'OR', 'NOT', 'XOR', 'NAND', 'NOR', 'XNOR', 'BUF',
       'BUS_AND', 'BUS_OR', 'BUS_XOR', 'BUS_NOT', 'MUX', 'ADDER', 'COMPARATOR']);
     const unsupported = this.nodes.filter((node) => !allowed.has(node.type));

@@ -248,7 +248,7 @@ button, input, select {
   .chip-workbench { grid-template-columns: 150px minmax(180px, 1fr); }
   .chip-inspector { display: none; }
   .chip-library-group { padding-right: 6px; padding-left: 6px; }
-  .chip-library-group > button { gap: 5px; }
+  .chip-library-group > button,.chip-library-group [data-preset-list] > button { gap: 5px; }
   .chip-io-icon, .chip-gate-icon { flex-basis: 29px; }
   .chip-toolbar { flex-wrap: wrap; gap: 7px; padding: 7px 9px; }
   .chip-design-search { min-width: 0; }
@@ -330,8 +330,14 @@ button, input, select {
 .chip-panel-title small { color: #64758a; font: 10px var(--font-ui); letter-spacing: 0; }
 .chip-library-group { padding: 8px 9px 10px; border-top: 1px solid #263244; }
 .chip-library-group h3 { padding: 0 5px 7px; color: #8191a6; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
-.chip-library-group > button { display: flex; align-items: center; width: 100%; gap: 8px; padding: 7px 5px; border-radius: 5px; background: transparent; color: #c5d0df; cursor: pointer; text-align: left; }
-.chip-library-group > button:hover { background: #202c3c; }
+.chip-library-group h3 > small { float: right; color: #64758a; font-size: 9px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.chip-preset-filters { display: grid; grid-template-columns: minmax(0, 1fr) 105px; gap: 5px; margin: 0 2px 7px; }
+.chip-preset-filters input,.chip-preset-filters select { width: 100%; min-width: 0; height: 28px; padding: 0 7px; border: 1px solid #344257; border-radius: 4px; outline: none; background: #111a26; color: #c5d0df; font: 10px var(--font-ui); }
+.chip-preset-filters input:focus,.chip-preset-filters select:focus { border-color: #5a91c4; }
+.chip-library-group [data-preset-list] > button[hidden] { display: none; }
+.chip-preset-empty { margin: 7px 5px; color: #8999ad; font-size: 10px; line-height: 1.45; }
+.chip-library-group > button,.chip-library-group [data-preset-list] > button { display: flex; align-items: center; width: 100%; gap: 8px; padding: 7px 5px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: #c5d0df; cursor: pointer; text-align: left; }
+.chip-library-group > button:hover,.chip-library-group [data-preset-list] > button:hover { background: #202c3c; }
 .chip-library-group > button.active { border: 1px solid #587eae; background: #20344e; }
 .chip-library-item { display: flex; align-items: center; width: 100%; gap: 8px; padding: 7px 5px; border-radius: 5px; background: transparent; color: #c5d0df; cursor: pointer; text-align: left; }
 .chip-library-item:hover { background: #202c3c; }
@@ -340,7 +346,7 @@ button, input, select {
 .chip-create-subcircuit { margin-top: 5px; border: 1px dashed #43566f !important; color: #9fc5ed !important; font-size: 10px; }
 .chip-gate-icon.clock { border-color: #856849; background: #423322; color: #f0c174; }
 .chip-gate-icon.custom { border-color: #39795e; background: #1d3e32; color: #91e0b3; }
-.chip-library-group > button > span:nth-child(2) { display: grid; flex: 1; gap: 3px; min-width: 0; }
+.chip-library-group > button > span:nth-child(2),.chip-library-group [data-preset-list] > button > span:nth-child(2) { display: grid; flex: 1; gap: 3px; min-width: 0; }
 .chip-library-group b { font-size: 11px; font-weight: 550; }
 .chip-library-group small { overflow: hidden; color: #7f8fa3; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .chip-library-group kbd { padding: 2px 4px; border: 1px solid #344257; border-radius: 3px; color: #8293a8; font: 9px var(--font-mono); }
@@ -544,6 +550,10 @@ button, input, select {
 .chip-mask-setup-modal label { display: grid; gap: 6px; color: #8494a9; font: 600 9px var(--font-mono); letter-spacing: .08em; }
 .chip-mask-setup-modal select { width: 100%; padding: 9px 10px; border: 1px solid #35445a; border-radius: 6px; background: #101722; color: #e0e8f1; font: 12px var(--font-ui); letter-spacing: 0; }
 .chip-mask-profile-summary { padding: 10px 11px; border: 1px solid #31465e; border-radius: 6px; background: #101a27; color: #bad5f2; font-size: 11px; line-height: 1.5; }
+.chip-asic-status { font-size: 12px; font-weight: 600; }
+.chip-asic-status[data-job-state="queued"],.chip-asic-status[data-job-state="running"] { border-color: #3a7082; background: #102a35; color: #a5e5f2; }
+.chip-asic-status[data-job-state="succeeded"] { border-color: #39795e; background: #142c23; color: #a7e6bd; }
+.chip-asic-status[data-job-state="failed"] { border-color: #8c4a4a; background: #321d20; color: #ffc1b8; }
 .chip-mask-profile-warning { margin: 0; color: #d5ad70; font-size: 10px; line-height: 1.55; }
 .chip-mask-setup-modal footer { display: flex; justify-content: flex-end; gap: 7px; padding-top: 10px; border-top: 1px solid #2d3c50; }
 .chip-mask-setup-modal footer button { padding: 7px 11px; border: 1px solid #35445a; border-radius: 5px; background: #202b3a; color: #c7d3e3; cursor: pointer; }

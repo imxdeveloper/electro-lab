@@ -70,6 +70,22 @@ function execFileAsync(command, args, options = {}) {
   }));
 }
 
+async function inspectDockerEngine(dockerCommand) {
+  try {
+    const { stdout } = await execFileAsync(dockerCommand, ['version', '--format', '{{.Server.Version}}'], { timeout: 8000 });
+    return { ready: true, version: stdout.trim() };
+  } catch (error) {
+    const details = `${error.message || ''} ${error.stderr || ''} ${error.stdout || ''}`;
+    const permissionDenied = /npipe|docker api|permission denied|access is denied/i.test(details);
+    return {
+      ready: false,
+      error: permissionDenied
+        ? 'Docker CLI is installed, but this app process cannot access Docker Desktop’s Windows named pipe. Start Docker Desktop and this app under the same Windows account. If your Docker Desktop installation requires docker-users membership, ask your administrator to grant it, then sign out and back in.'
+        : 'Docker CLI is installed, but the Docker Engine is not responding. Start Docker Desktop and wait until its engine is running before retrying.'
+    };
+  }
+}
+
 async function listFiles(root, filter) {
   const files = [];
   async function walk(folder) {
@@ -201,8 +217,11 @@ export function createEdaPlugin() {
               ['openlane', 'yosys', 'openroad', 'klayout', 'magic', 'docker', 'wsl'].map(findCommand));
             const configuredCommand = await findCommand(openlaneCommand);
             const useDocker = !configuredCommand && Boolean(docker);
+            const dockerEngine = useDocker ? await inspectDockerEngine(docker) : null;
             sendJson(response, 200, {
-              runnerReady: Boolean(configuredCommand || docker),
+              runnerReady: Boolean(configuredCommand || docker && dockerEngine?.ready),
+              dockerReady: dockerEngine?.ready ?? null,
+              dockerError: dockerEngine?.error ?? null,
               runner: configuredCommand
                 ? { command: openlaneCommand, path: configuredCommand, mode: 'OpenLane CLI' }
                 : useDocker ? { command: docker, image: openlaneImage, mode: 'Docker image' } : null,
@@ -222,6 +241,13 @@ export function createEdaPlugin() {
             if (!command && !docker) {
               sendJson(response, 503, { error: `OpenLane CLI and Docker are unavailable. Install OpenLane 2 or Docker, or set ELECTRO_OPENLANE_BIN before starting the app.` });
               return;
+            }
+            if (!command && docker) {
+              const dockerEngine = await inspectDockerEngine(docker);
+              if (!dockerEngine.ready) {
+                sendJson(response, 503, { error: dockerEngine.error });
+                return;
+              }
             }
             if ([...jobs.values()].some((job) => job.status === 'running' || job.status === 'queued')) {
               sendJson(response, 409, { error: 'An OpenLane job is already running. Wait for it to finish before starting another.' });
