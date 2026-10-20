@@ -143,6 +143,76 @@ export function parseDef(text) {
 }
 
 /**
+ * Pair every DEF component with the GDS placement that draws it.
+ *
+ * The two files use different origin conventions. A DEF component's `( x y )` is
+ * the placed cell origin in the cell's own frame, while a GDS placement records
+ * the translation of a transformed cell: for a rotated or mirrored instance the
+ * two differ by the cell's width and height. Comparing the numbers directly only
+ * works for unrotated cells, so this matches on geometry instead — the DEF origin
+ * has to fall inside the drawn extent of a placement of the same cell type.
+ *
+ * Every match is reported with how it was established, so callers never have to
+ * guess whether a coordinate pair was verified or merely inferred.
+ *
+ * @param {object} def result of parseDef()
+ * @param {Array<{name: string, box: object}>} instances flattened GDS placements
+ * @param {object} options tolerance in database units
+ * @returns {Map<string, object>} component name -> { instance, confidence, delta }
+ */
+export function matchComponentsToInstances(def, instances, options = {}) {
+  const tolerance = options.tolerance ?? 2;
+  const byCell = new Map();
+  for (const instance of instances) {
+    if (!byCell.has(instance.name)) byCell.set(instance.name, []);
+    byCell.get(instance.name).push(instance);
+  }
+
+  const matches = new Map();
+  const taken = new Set();
+
+  // Exact origin agreement is the strongest evidence, so claim those first and
+  // leave the remaining placements for the geometric pass below.
+  const pending = [];
+  for (const component of def.components) {
+    const candidates = byCell.get(component.cell) ?? [];
+    const exact = candidates.find((instance) => (
+      !taken.has(instance) && component.placed &&
+      Math.abs(instance.x - component.x) <= tolerance &&
+      Math.abs(instance.y - component.y) <= tolerance
+    ));
+    if (exact) {
+      taken.add(exact);
+      matches.set(component.name, { instance: exact, confidence: 'origin', delta: 0 });
+    } else {
+      pending.push(component);
+    }
+  }
+
+  for (const component of pending) {
+    const candidates = (byCell.get(component.cell) ?? []).filter((instance) => !taken.has(instance));
+    const inside = candidates.find((instance) => {
+      const box = instance.box;
+      if (!box) return false;
+      return component.x >= box.minX - tolerance && component.x <= box.maxX + tolerance &&
+        component.y >= box.minY - tolerance && component.y <= box.maxY + tolerance;
+    });
+    if (!inside) continue;
+    taken.add(inside);
+    matches.set(component.name, {
+      instance: inside,
+      confidence: 'inside',
+      delta: {
+        dx: component.x - inside.x,
+        dy: component.y - inside.y
+      }
+    });
+  }
+
+  return matches;
+}
+
+/**
  * Which placed instance drives each top-level output port.
  *
  * For a register bank, the output net reaches the outside world through one

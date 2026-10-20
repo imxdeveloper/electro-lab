@@ -348,7 +348,7 @@ export class MaskLabPanel {
     if (this.autoFillButton) {
       this.autoFillButton.disabled = technology.id !== 'generic';
       this.autoFillButton.title = technology.id === 'generic'
-        ? 'Rasterize the Chip Lab schematic for educational preview'
+        ? 'Generate conceptual mask layers from the Chip Lab placement preview'
         : 'Schematic rasterization is only available in the Educational profile';
     }
     if (this.layerListEl) {
@@ -415,7 +415,10 @@ export class MaskLabPanel {
         const unresolved = this.sourceDesign.simulation?.unresolvedComponents?.length || 0;
         const passed = this.sourceDesign.testBench?.passed;
         const tests = this.sourceDesign.testBench?.total;
-        this.maskSourceDetailsEl.textContent = `${this.sourceDesign.componentCount} components · ${this.sourceDesign.wireCount} wires · ${unresolved} unresolved${Number.isInteger(tests) ? ` · tests ${passed}/${tests}` : ''}`;
+        const layout = this.sourceDesign.physicalLayout;
+        const dieSize = layout ? ` · die ${layout.widthMm} × ${layout.heightMm} mm` : '';
+        this.maskSourceDetailsEl.textContent = `${this.sourceDesign.componentCount} components · ${this.sourceDesign.wireCount} wires${dieSize} · ${unresolved} unresolved${Number.isInteger(tests) ? ` · tests ${passed}/${tests}` : ''}`;
+        if (this.sourceDesign.sourceView === 'physical-layout-preview') this.maskSourceDetailsEl.textContent += ' · physical placement';
       }
     }
   }
@@ -641,7 +644,7 @@ export class MaskLabPanel {
     this.saveState();
   }
 
-  traceDesignLine(x0, y0, x1, y1) {
+  traceDesignLine(x0, y0, x1, y1, targetMask = this.mask) {
     if (![x0, y0, x1, y1].every(Number.isFinite)) return;
     let x = x0;
     let y = y0;
@@ -651,7 +654,7 @@ export class MaskLabPanel {
     const sy = y0 < y1 ? 1 : -1;
     let error = dx + dy;
     while (true) {
-      if (x >= 0 && y >= 0 && x < this.gridWidth && y < this.gridHeight) this.mask[y][x] = true;
+      if (x >= 0 && y >= 0 && x < this.gridWidth && y < this.gridHeight) targetMask[y][x] = true;
       if (x === x1 && y === y1) break;
       const doubled = 2 * error;
       if (doubled >= dy) {
@@ -687,6 +690,61 @@ export class MaskLabPanel {
       this.setStatus('The Chip Lab design has no components with valid layout positions.');
       return false;
     }
+    const physicalLayout = chipLab.normalizePhysicalLayout?.(chipLab.physicalLayout) || null;
+    const usesPhysicalLayout = Boolean(physicalLayout && nodes.every((node) => physicalLayout.placements?.[node.id]));
+    if (usesPhysicalLayout) {
+      const activeMask = this.createMask(this.gridWidth, this.gridHeight);
+      const gateMask = this.createMask(this.gridWidth, this.gridHeight);
+      const metalMask = this.createMask(this.gridWidth, this.gridHeight);
+      const margin = 2;
+      const availableWidth = Math.max(1, this.gridWidth - margin * 2 - 1);
+      const availableHeight = Math.max(1, this.gridHeight - margin * 2 - 1);
+      const aspect = physicalLayout.widthMm / physicalLayout.heightMm;
+      let renderedWidth = availableWidth, renderedHeight = renderedWidth / aspect;
+      if (renderedHeight > availableHeight) {
+        renderedHeight = availableHeight;
+        renderedWidth = renderedHeight * aspect;
+      }
+      const offsetX = (this.gridWidth - 1 - renderedWidth) / 2;
+      const offsetY = (this.gridHeight - 1 - renderedHeight) / 2;
+      const cellWidth = Math.max(2, Math.round(renderedWidth * 0.104));
+      const cellHeight = Math.max(2, Math.round(renderedHeight * 0.095));
+      const project = (placement) => ({
+        x: Math.max(0, Math.min(this.gridWidth - 1, Math.round(offsetX + placement.x * renderedWidth))),
+        y: Math.max(0, Math.min(this.gridHeight - 1, Math.round(offsetY + placement.y * renderedHeight)))
+      });
+      const centers = new Map();
+      for (const node of nodes) {
+        const center = project(physicalLayout.placements[node.id]);
+        centers.set(node.id, center);
+        const left = center.x - Math.floor(cellWidth / 2), right = center.x + Math.floor(cellWidth / 2);
+        const top = center.y - Math.floor(cellHeight / 2), bottom = center.y + Math.floor(cellHeight / 2);
+        this.traceDesignLine(left, top, right, top, activeMask);
+        this.traceDesignLine(right, top, right, bottom, activeMask);
+        this.traceDesignLine(right, bottom, left, bottom, activeMask);
+        this.traceDesignLine(left, bottom, left, top, activeMask);
+        this.traceDesignLine(center.x, center.y, center.x, center.y, gateMask);
+        if (node.type === 'VPLUS' || node.type === 'GROUND') {
+          this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y, gateMask);
+        }
+      }
+      for (const wire of wires) {
+        const start = centers.get(wire.from), end = centers.get(wire.to);
+        if (!start || !end) continue;
+        if (wire.route === 'straight') this.traceDesignLine(start.x, start.y, end.x, end.y, metalMask);
+        else {
+          const bendX = Math.round((start.x + end.x) / 2);
+          this.traceDesignLine(start.x, start.y, bendX, start.y, metalMask);
+          this.traceDesignLine(bendX, start.y, bendX, end.y, metalMask);
+          this.traceDesignLine(bendX, end.y, end.x, end.y, metalMask);
+        }
+      }
+      this.layerMasks.active = activeMask;
+      this.layerMasks.gate = gateMask;
+      this.layerMasks.metal1 = metalMask;
+      this.activeLayerId = 'metal1';
+      this.setCurrentLayerMask(metalMask);
+    } else {
     const geometry = nodes.map((node) => ({
       node,
       left: node.x,
@@ -766,6 +824,7 @@ export class MaskLabPanel {
         this.traceDesignLine(a.x, a.y, b.x, b.y);
       }
     }
+    }
 
     const powerCheck = chipLab.inspectPowerRails?.() || null;
     const simulation = chipLab.evaluate?.();
@@ -788,6 +847,8 @@ export class MaskLabPanel {
       designId: chipLab.designId || null,
       componentCount: nodes.length,
       wireCount: wires.length,
+      physicalLayout,
+      sourceView: usesPhysicalLayout ? 'physical-layout-preview' : 'schematic-preview',
       generatedAt: new Date().toISOString(),
       powerCheck,
       simulation: {
@@ -806,13 +867,14 @@ export class MaskLabPanel {
     if (nameInput) nameInput.value = this.name;
     this.profileLayouts[this.technologyId].name = this.name;
     this.profileLayouts[this.technologyId].sourceDesign = this.sourceDesign;
+    this.renderTechnologyProfile();
     this.renderGrid();
     this.updateSummary();
     const stateSaved = this.saveState();
     const status = powerCheck?.ok
       ? `Auto-filled ${nodes.length} components and ${wires.length} wires. V+ and GND are connected; ${unresolvedComponents.length} unresolved component(s).`
       : `Auto-filled ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck?.issues.join(' ') || 'power rails are not configured.'}`;
-    this.setStatus(`${status}${stateSaved ? '' : ' Autosave failed; export the mask to keep a copy.'}`);
+    this.setStatus(`${status}${usesPhysicalLayout ? ' Conceptual ACTIVE, GATE, and METAL 1 layers generated.' : ''}${stateSaved ? '' : ' Autosave failed; export the mask to keep a copy.'}`);
     return true;
   }
 

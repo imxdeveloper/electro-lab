@@ -1,3 +1,5 @@
+import { MASK_TECHNOLOGIES } from '../data/MaskTechnologyProfiles.js';
+
 const GATES = {
   AND: { inputs: 2, description: 'High only when every input is high.' },
   OR: { inputs: 2, description: 'High when one or more inputs are high.' },
@@ -70,6 +72,8 @@ export class ChipLabPanel {
     this.nodeSequence = 0;
     this.dragState = null;
     this.chipName = 'Untitled Logic Chip';
+    this.physicalLayout = { widthMm: 1, heightMm: 1, placements: {} };
+    this.viewMode = 'logic';
     this.selectedNodeIds = new Set();
     this.nodeClipboard = null;
     this.gridSnap = true;
@@ -110,12 +114,20 @@ export class ChipLabPanel {
           <button type="button" data-chip-action="import">Import</button>
           <button type="button" data-chip-action="import-hdl">Import Verilog</button>
           <button type="button" data-chip-action="export-hdl">Export Verilog</button>
+          <button type="button" data-chip-action="asic-flow" class="chip-primary">EDA Setup</button>
           <button type="button" data-chip-action="generate-mask">Generate Mask</button>
+          <button type="button" data-chip-action="open-testbench">Test Lab</button>
           <button type="button" data-chip-action="export" class="chip-primary">Export design</button>
           <input type="file" accept=".json,application/json" data-chip-file hidden>
           <input type="file" accept=".v,.sv,text/plain" data-chip-hdl-file hidden>
         </div>
       </header>
+      <section class="chip-layout-strip" aria-label="Physical chip envelope">
+        <div><strong>PHYSICAL ENVELOPE</strong><small>Die outline specification · schematic coordinates are separate</small></div>
+        <label>WIDTH <span><input type="number" min="0.01" max="1000" step="0.01" value="1.00" data-chip-die-width aria-label="Die width in millimeters"> mm</span></label>
+        <label>HEIGHT <span><input type="number" min="0.01" max="1000" step="0.01" value="1.00" data-chip-die-height aria-label="Die height in millimeters"> mm</span></label>
+        <output data-chip-die-area>1.00 mm²</output>
+      </section>
       <div class="chip-workbench">
         <aside class="chip-library">
           <div class="chip-panel-title"><span>COMPONENTS</span><small>Click to place</small></div>
@@ -179,8 +191,9 @@ export class ChipLabPanel {
         <main class="chip-design-area">
           <div class="chip-toolbar">
             <div class="chip-breadcrumb"><span>PROJECT</span><b data-chip-title>Untitled Logic Chip</b><span class="chip-rev">REV A</span></div>
+            <div class="chip-view-toggle" role="group" aria-label="Design view"><button type="button" data-chip-action="logic-view" aria-pressed="true" class="active">Logic</button><button type="button" data-chip-action="physical-view" aria-pressed="false">Physical</button></div>
             <label class="chip-design-search"><span>FIND</span><input type="search" data-chip-find placeholder="Component or signal…" autocomplete="off" aria-label="Find a component or signal"><div data-chip-find-results hidden></div></label>
-            <div class="chip-canvas-actions">
+            <div class="chip-canvas-actions" role="toolbar" aria-label="Schematic editing tools" tabindex="0">
               <button type="button" data-chip-action="undo" title="Undo (Ctrl+Z)">Undo</button>
               <button type="button" data-chip-action="redo" title="Redo (Ctrl+Y)">Redo</button>
               <button type="button" data-chip-action="copy" title="Copy selected components (Ctrl+C)">Copy</button>
@@ -199,7 +212,7 @@ export class ChipLabPanel {
               <button type="button" data-chip-action="clear" title="Remove all components">Clear</button>
             </div>
           </div>
-          <div class="chip-canvas-wrap">
+          <div class="chip-canvas-wrap" data-chip-logic-view>
             <svg class="chip-canvas" viewBox="0 0 1200 740" role="application" aria-label="Logic chip schematic canvas">
               <defs>
                 <pattern id="chip-grid-small" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M 20 0 L 0 0 0 20" fill="none" stroke="#243041" stroke-width="0.7"/></pattern>
@@ -212,7 +225,12 @@ export class ChipLabPanel {
             <div class="chip-empty-state" data-chip-empty><span class="chip-empty-icon">⌘</span><strong>Start your logic design</strong><p>Add input pins and gates from the component library.<br>Connect output dots to input dots to build a circuit.</p><button data-chip-preset="half-adder">Load a half-adder example</button></div>
             <div class="chip-canvas-legend"><span><i class="legend-low"></i> LOW / 0</span><span><i class="legend-high"></i> HIGH / 1</span><span><i class="legend-wire"></i> Signal wire</span></div>
           </div>
-          <footer class="chip-statusbar"><span data-chip-status>Ready · Select a component to inspect it</span><span data-chip-count>0 components · 0 nets</span><span>GRID 20 px</span></footer>
+          <div class="chip-physical-wrap" data-chip-physical-view hidden>
+            <div class="chip-physical-toolbar"><span><strong>PLACEMENT VIEW</strong> · drag cells inside the die boundary</span><span data-physical-die-size>1.00 mm × 1.00 mm</span></div>
+            <svg class="chip-physical-canvas" viewBox="0 0 1200 740" role="application" aria-label="Physical chip placement canvas"><defs><pattern id="physical-die-grid" width="25" height="25" patternUnits="userSpaceOnUse"><path d="M25 0H0V25" fill="none" stroke="#26364a" stroke-width="1"/></pattern></defs><rect width="1200" height="740" fill="#0b111a"/><rect x="70" y="42" width="1060" height="656" rx="12" fill="url(#physical-die-grid)" stroke="#5b789c" stroke-width="2" data-physical-die/><g data-physical-wires></g><g data-physical-nodes></g></svg>
+            <div class="chip-physical-legend"><span><i class="physical-cell-swatch"></i> Conceptual cell</span><span><i class="physical-wire-swatch"></i> Signal route</span><small>Placement preview only · no cell dimensions or manufacturing rules</small></div>
+          </div>
+          <footer class="chip-statusbar"><span data-chip-status>Ready · Select a component to inspect it</span><span data-chip-count>0 components · 0 nets</span><span data-chip-grid-label>GRID 20 px</span></footer>
         </main>
         <aside class="chip-inspector">
           <nav class="chip-inspector-tabs"><button class="active" data-chip-tab="inspect">Inspector</button><button data-chip-tab="simulate">Simulation</button></nav>
@@ -231,8 +249,9 @@ export class ChipLabPanel {
         </section>
       </div>
       <div class="chip-testbench-modal" data-chip-testbench-modal hidden>
-        <section><header><div><strong>Test benches</strong><span>Build a sequence of input vectors and expected outputs</span></div><button data-chip-action="close-testbench" aria-label="Close test benches">×</button></header>
+        <section><header><div><strong>Test Lab</strong><span>Run schematic checks, logic simulation, and saved test vectors</span></div><button data-chip-action="close-testbench" aria-label="Close Test Lab">×</button></header>
           <label>TEST BENCH NAME<input data-testbench-name maxlength="48" value="Untitled test bench"></label>
+          <div class="chip-testlab-checks"><div><strong>DESIGN VERIFICATION</strong><small>Logic schematic checks and current simulation state</small></div><button type="button" data-chip-action="run-testlab-checks">Run design checks</button><article data-testlab-check-results><p class="chip-diagnostic info">Run checks to review unresolved logic and circuit warnings.</p></article><small class="chip-testlab-scope">These checks do not validate physical placement, mask rules, timing, or silicon behavior.</small></div>
           <div class="chip-testbench-steps" data-testbench-steps></div>
           <div class="chip-testbench-results" data-testbench-results aria-live="polite"></div>
           <footer><label class="chip-testbench-clock"><input type="checkbox" data-testbench-clock> Clock edge for next step</label><button data-chip-action="add-test-step">Add current vector</button><button data-chip-action="generate-exhaustive">Generate exhaustive</button><label class="chip-testbench-seed">Seed <input data-random-seed type="number" min="0" max="4294967295" step="1" placeholder="optional"></label><button data-chip-action="generate-random">Add 32 random</button><button data-chip-action="generate-boundary">Boundary cases</button><button class="chip-primary" data-chip-action="run-testbench">Run tests</button><button data-chip-action="import-testbench-csv">Import CSV (append)</button><button data-chip-action="export-testbench-csv">Export CSV</button><input type="file" accept=".csv,text/csv" data-testbench-csv-file hidden></footer>
@@ -262,9 +281,28 @@ export class ChipLabPanel {
           <p data-fsm-error role="status"></p>
         </section>
       </div>
+      <div class="chip-mask-setup-modal" data-chip-mask-setup-modal hidden>
+        <section role="dialog" aria-modal="true" aria-labelledby="chip-mask-setup-title">
+          <header><div><strong id="chip-mask-setup-title">Choose a mask profile</strong><span>Pick the layer set to open in Mask Lab.</span></div><button type="button" data-chip-action="close-mask-setup" aria-label="Close">×</button></header>
+          <label>PROFILE<select data-chip-mask-profile>${MASK_TECHNOLOGIES.map((technology) => `<option value="${technology.id}">${technology.name}</option>`).join('')}</select></label>
+          <div class="chip-mask-profile-summary" data-chip-mask-profile-summary aria-live="polite"></div>
+          <p class="chip-mask-profile-warning">PDK profiles are reference layer lists. Chip Lab does not yet convert logic gates into foundry-ready transistor geometry or mask data.</p>
+          <footer><button type="button" data-chip-action="close-mask-setup">Cancel</button><button type="button" class="chip-primary" data-chip-action="confirm-mask-setup">Open profile</button></footer>
+        </section>
+      </div>
+      <div class="chip-mask-setup-modal" data-chip-asic-modal hidden>
+        <section role="dialog" aria-modal="true" aria-labelledby="chip-asic-title">
+          <header><div><strong id="chip-asic-title">Local EDA setup</strong><span>Check which physical-design tools are available before wiring the in-app run flow.</span></div><button type="button" data-chip-action="close-asic-flow" aria-label="Close">×</button></header>
+          <label>PDK<select data-chip-asic-pdk><option value="sky130A">SkyWater SKY130A</option><option value="sky130B">SkyWater SKY130B</option><option value="gf180mcuD">GF180MCU D</option></select></label>
+          <div class="chip-mask-profile-summary" data-chip-asic-status aria-live="polite">Checking local EDA tools…</div>
+          <p class="chip-mask-profile-warning">This first step only detects tools. It does not run synthesis, placement, routing, DRC/LVS, or make GDS. The next step is connecting an OpenLane runner and returning its verified artifacts here.</p>
+          <footer><button type="button" data-chip-action="close-asic-flow">Close</button><button type="button" class="chip-primary" data-chip-action="run-asic-flow">Refresh tool check</button></footer>
+        </section>
+      </div>
     `;
     document.body.appendChild(this.el);
     this.bindEvents();
+    this.renderPhysicalLayout();
     this.render();
   }
 
@@ -278,6 +316,11 @@ export class ChipLabPanel {
   }
 
   bindEvents() {
+    const maskSetupModal = this.el.querySelector('[data-chip-mask-setup-modal]');
+    this.el.querySelector('[data-chip-mask-profile]').addEventListener('change', () => this.renderMaskProfileSummary());
+    maskSetupModal.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') maskSetupModal.hidden = true;
+    });
     this.el.addEventListener('click', (event) => {
       const waveform = event.target.closest('[data-wave-node-id]');
       if (waveform) {
@@ -357,6 +400,7 @@ export class ChipLabPanel {
       }
     });
     this.el.addEventListener('change', (event) => {
+      if (event.target.matches('[data-chip-die-width],[data-chip-die-height]')) this.updatePhysicalLayout(event.target);
       if (event.target.matches('[data-chip-label]')) this.renderInspector();
       if (event.target.matches('[data-wire-route]')) {
         const wire = this.wires[this.selectedWireIndex];
@@ -399,12 +443,15 @@ export class ChipLabPanel {
     this.el.querySelector('[data-chip-hdl-file]').addEventListener('change', (event) => this.importVerilog(event.target.files?.[0]));
     this.el.querySelector('[data-testbench-csv-file]').addEventListener('change', (event) => this.importTestBenchCsv(event.target.files?.[0]));
     this.el.addEventListener('focusin', (event) => {
-      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-wire-route],[data-chip-note]')) {
+      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-wire-route],[data-chip-note],[data-chip-die-width],[data-chip-die-height]')) {
         this.historyCapture = this.snapshotDesign();
+      }
+      if (event.target.matches('[data-chip-mask-setup-modal]')) {
+        event.target.hidden = true;
       }
     });
     this.el.addEventListener('change', (event) => {
-      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-chip-note]')) {
+      if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-chip-note],[data-chip-die-width],[data-chip-die-height]')) {
         this.commitHistory(this.historyCapture);
         this.historyCapture = null;
       }
@@ -502,6 +549,43 @@ export class ChipLabPanel {
         this.selectNode(node.id, true);
       }
     });
+    const physicalCanvas = this.el.querySelector('.chip-physical-canvas');
+    physicalCanvas.addEventListener('pointerdown', (event) => {
+      const item = event.target.closest('[data-physical-node]');
+      if (!item) return;
+      const node = this.nodes.find((entry) => entry.id === item.dataset.nodeId);
+      if (!node) return;
+      this.ensurePhysicalPlacements();
+      this.dragState = { physicalNodeId: node.id, pointerX: event.clientX, pointerY: event.clientY, moved: false, before: this.snapshotDesign() };
+      physicalCanvas.setPointerCapture(event.pointerId);
+      this.selectedNodeId = node.id;
+      this.selectedNodeIds = new Set([node.id]);
+      this.selectNode(node.id, false);
+      event.preventDefault();
+    });
+    physicalCanvas.addEventListener('pointermove', (event) => {
+      if (!this.dragState?.physicalNodeId) return;
+      if (Math.hypot(event.clientX - this.dragState.pointerX, event.clientY - this.dragState.pointerY) > 2) this.dragState.moved = true;
+      if (!this.dragState.moved) return;
+      const point = this.svgPoint(event, physicalCanvas);
+      const nodeId = this.dragState.physicalNodeId;
+      const die = this.physicalDieRect();
+      const cell = this.physicalCellSize(die);
+      this.physicalLayout.placements[nodeId] = {
+        x: Math.max(cell.width / (2 * die.width), Math.min(1 - cell.width / (2 * die.width), (point.x - die.x) / die.width)),
+        y: Math.max(cell.height / (2 * die.height), Math.min(1 - cell.height / (2 * die.height), (point.y - die.y) / die.height))
+      };
+      this.renderPhysicalCanvas();
+    });
+    physicalCanvas.addEventListener('pointerup', () => {
+      if (!this.dragState?.physicalNodeId) return;
+      const { before, moved } = this.dragState;
+      this.dragState = null;
+      if (moved) {
+        this.commitHistory(before);
+        this.setStatus('Physical placement updated.');
+      }
+    });
     window.addEventListener('keydown', (event) => {
       if (this.el.hidden || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
@@ -525,13 +609,14 @@ export class ChipLabPanel {
   }
 
   handleAction(action, detail = {}) {
-    if (action === 'generate-mask') {
-      this.editor.setWorkspaceMode('masks').then(() => {
-        if (this.editor.workspaceMode === 'masks') {
-          this.editor.maskLabPanel?.autoFillFromChipDesign();
-        }
-      });
-    }
+    if (action === 'logic-view') this.setViewMode('logic');
+    if (action === 'physical-view') this.setViewMode('physical');
+    if (action === 'generate-mask') this.openMaskSetup();
+    if (action === 'asic-flow') this.openAsicFlow();
+    if (action === 'close-asic-flow') this.el.querySelector('[data-chip-asic-modal]').hidden = true;
+    if (action === 'run-asic-flow') this.checkAsicRunner();
+    if (action === 'close-mask-setup') this.el.querySelector('[data-chip-mask-setup-modal]').hidden = true;
+    if (action === 'confirm-mask-setup') this.generateMaskForSelectedProfile();
     if (action === 'new') {
       this.commitHistory();
       this.stopClock();
@@ -548,6 +633,8 @@ export class ChipLabPanel {
       this.nodeSequence = 0;
       this.setGroupSelectionMode(false);
       this.chipName = 'Untitled Logic Chip';
+      this.physicalLayout = { widthMm: 1, heightMm: 1, placements: {} };
+      this.renderPhysicalLayout();
       this.el.querySelector('[data-chip-name]').value = this.chipName;
       this.el.querySelector('[data-chip-title]').textContent = this.chipName;
       this.render();
@@ -570,7 +657,7 @@ export class ChipLabPanel {
     if (action === 'export') this.exportDesign();
     if (action === 'import') this.el.querySelector('[data-chip-file]').click();
     if (action === 'import-hdl') this.el.querySelector('[data-chip-hdl-file]').click();
-    if (action === 'export-hdl') this.exportVerilog();
+    if (action === 'export-hdl') this.downloadVerilog();
     if (action === 'undo') this.undo();
     if (action === 'redo') this.redo();
     if (action === 'tidy') this.tidyLayout();
@@ -617,6 +704,7 @@ export class ChipLabPanel {
     if (action === 'add-test-step') this.addTestBenchStep();
     if (action === 'delete-test-step') this.deleteTestBenchStep(Number(detail.testStepIndex));
     if (action === 'run-testbench') this.runTestBench();
+    if (action === 'run-testlab-checks') this.renderTestLabChecks();
     if (action === 'generate-exhaustive') this.generateTestVectors('exhaustive');
     if (action === 'generate-random') {
       const rawSeed = this.el.querySelector('[data-random-seed]').value;
@@ -717,7 +805,8 @@ export class ChipLabPanel {
       name,
       updatedAt: new Date().toLocaleString(),
       design: {
-        format: 'electro-lab-chip-design', version: 4, designId: this.designId, name,
+        format: 'electro-lab-chip-design', version: 5, designId: this.designId, name,
+        physicalLayout: structuredClone(this.physicalLayout),
         components: structuredClone(this.nodes),
         wires: structuredClone(this.wires),
         testBench: structuredClone(this.testBench)
@@ -939,10 +1028,133 @@ export class ChipLabPanel {
       nodes: structuredClone(this.nodes),
       wires: structuredClone(this.wires),
       chipName: this.chipName,
+      physicalLayout: structuredClone(this.physicalLayout),
       designId: this.designId,
       testBench: structuredClone(this.testBench),
       viewBox: this.el.querySelector('.chip-canvas')?.getAttribute('viewBox') || '0 0 1200 740'
     };
+  }
+
+  openMaskSetup() {
+    const modal = this.el.querySelector('[data-chip-mask-setup-modal]');
+    const profileSelect = this.el.querySelector('[data-chip-mask-profile]');
+    profileSelect.value = this.editor?.maskLabPanel?.technologyId || 'generic';
+    this.renderMaskProfileSummary();
+    modal.hidden = false;
+    profileSelect.focus();
+  }
+
+  async openAsicFlow() {
+    const modal = this.el.querySelector('[data-chip-asic-modal]');
+    modal.hidden = false;
+    this.el.querySelector('[data-chip-asic-status]').textContent = 'Checking local EDA tool availability…';
+    await this.checkAsicRunner();
+  }
+
+  async checkAsicRunner() {
+    const status = this.el.querySelector('[data-chip-asic-status]');
+    const button = this.el.querySelector('[data-chip-action="run-asic-flow"]');
+    button.disabled = true;
+    try {
+      const response = await fetch('/api/eda/status', { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Local app server returned ${response.status}.`);
+      const result = await response.json();
+      const available = result.tools?.filter((tool) => tool.available).map((tool) => tool.name) || [];
+      const missing = result.tools?.filter((tool) => !tool.available).map((tool) => tool.name) || [];
+      status.textContent = `Tool check only · detected: ${available.join(', ') || 'none'} · not found: ${missing.join(', ') || 'none'}. No RTL was exported and no physical run was started.`;
+    } catch (error) {
+      status.textContent = `Could not reach the local EDA status service (${error.message}). Start Chip Lab with “npm run dev” to use its local runner connection.`;
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Check runner';
+    }
+  }
+
+  renderMaskProfileSummary() {
+    const technology = MASK_TECHNOLOGIES.find(({ id }) => id === this.el.querySelector('[data-chip-mask-profile]').value);
+    const summary = this.el.querySelector('[data-chip-mask-profile-summary]');
+    const confirm = this.el.querySelector('[data-chip-action="confirm-mask-setup"]');
+    if (!technology || !summary || !confirm) return;
+    const isEducational = technology.id === 'generic';
+    summary.textContent = isEducational
+      ? `${technology.layers.length} conceptual editor layers. Generate a learning preview from this Chip Lab design. Existing Educational artwork will be replaced.`
+      : `${technology.layers.length} reference editor layers. The PDK stack is for inspection; no chip geometry will be generated.`;
+    confirm.textContent = isEducational ? 'Generate preview' : 'Open layer stack';
+  }
+
+  async generateMaskForSelectedProfile() {
+    const technology = MASK_TECHNOLOGIES.find(({ id }) => id === this.el.querySelector('[data-chip-mask-profile]').value);
+    if (!technology || !this.editor) return;
+    this.el.querySelector('[data-chip-mask-setup-modal]').hidden = true;
+    await this.editor.setWorkspaceMode('masks');
+    if (this.editor.workspaceMode !== 'masks') return;
+    const maskLab = this.editor.maskLabPanel;
+    if (!maskLab) return;
+    if (maskLab.technologyId !== technology.id) maskLab.selectTechnology(technology.id);
+    if (technology.id === 'generic') {
+      maskLab.autoFillFromChipDesign();
+    } else {
+      maskLab.setStatus(`${technology.name} opened with ${technology.layers.length} reference editor layers. This is not a generated PDK layout or foundry mask set.`);
+    }
+  }
+
+  normalizePhysicalLayout(layout) {
+    const valid = (value) => Number.isFinite(value) && value >= 0.01 && value <= 1000;
+    const placements = {};
+    if (layout?.placements && typeof layout.placements === 'object' && !Array.isArray(layout.placements)) {
+      for (const [id, point] of Object.entries(layout.placements)) {
+        if (typeof id === 'string' && point && Number.isFinite(point.x) && Number.isFinite(point.y) &&
+            point.x >= 0 && point.x <= 1 && point.y >= 0 && point.y <= 1) {
+          placements[id] = { x: point.x, y: point.y };
+        }
+      }
+    }
+    return {
+      widthMm: valid(layout?.widthMm) ? layout.widthMm : 1,
+      heightMm: valid(layout?.heightMm) ? layout.heightMm : 1,
+      placements
+    };
+  }
+
+  ensurePhysicalPlacements() {
+    this.physicalLayout.placements ||= {};
+    const nodeIds = new Set(this.nodes.map(({ id }) => id));
+    for (const id of Object.keys(this.physicalLayout.placements)) if (!nodeIds.has(id)) delete this.physicalLayout.placements[id];
+    const unplaced = this.nodes.filter((node) => !this.physicalLayout.placements[node.id]);
+    if (!unplaced.length) return;
+    const xs = this.nodes.map((node) => node.x + 75);
+    const ys = this.nodes.map((node) => node.y + this.nodeHeight(node) / 2);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    for (const node of unplaced) {
+      this.physicalLayout.placements[node.id] = {
+        x: maxX === minX ? 0.5 : 0.12 + ((node.x + 75 - minX) / (maxX - minX)) * 0.76,
+        y: maxY === minY ? 0.5 : 0.12 + ((node.y + this.nodeHeight(node) / 2 - minY) / (maxY - minY)) * 0.76
+      };
+    }
+  }
+
+  renderPhysicalLayout() {
+    const width = this.el.querySelector('[data-chip-die-width]');
+    const height = this.el.querySelector('[data-chip-die-height]');
+    if (width) width.value = this.physicalLayout.widthMm.toFixed(2);
+    if (height) height.value = this.physicalLayout.heightMm.toFixed(2);
+    const area = this.el.querySelector('[data-chip-die-area]');
+    if (area) area.textContent = `${(this.physicalLayout.widthMm * this.physicalLayout.heightMm).toFixed(2)} mm²`;
+  }
+
+  updatePhysicalLayout(input) {
+    const value = Number(input.value);
+    if (!Number.isFinite(value) || value < 0.01 || value > 1000) {
+      this.renderPhysicalLayout();
+      this.setStatus('Die dimensions must be between 0.01 mm and 1,000 mm.');
+      return false;
+    }
+    const key = input.matches('[data-chip-die-width]') ? 'widthMm' : 'heightMm';
+    this.physicalLayout[key] = Math.round(value * 1000) / 1000;
+    this.renderPhysicalLayout();
+    this.renderPhysicalCanvas();
+    this.setStatus(`Physical die envelope set to ${this.physicalLayout.widthMm} mm × ${this.physicalLayout.heightMm} mm.`);
+    return true;
   }
 
   commitHistory(snapshot = this.snapshotDesign()) {
@@ -958,10 +1170,13 @@ export class ChipLabPanel {
     this.nodes = structuredClone(snapshot.nodes);
     this.wires = structuredClone(snapshot.wires);
     this.chipName = snapshot.chipName;
+    this.physicalLayout = this.normalizePhysicalLayout(snapshot.physicalLayout);
+    this.renderPhysicalLayout();
     if (typeof snapshot.designId === 'string') this.designId = snapshot.designId;
     if (snapshot.testBench) this.testBench = structuredClone(snapshot.testBench);
     this.el.querySelector('[data-chip-name]').value = this.chipName;
     this.el.querySelector('[data-chip-title]').textContent = this.chipName;
+    this.setViewMode(this.viewMode);
     this.el.querySelector('.chip-canvas').setAttribute('viewBox', snapshot.viewBox);
     this.selectedNodeId = null;
     this.selectedNodeIds.clear();
@@ -2074,6 +2289,40 @@ export class ChipLabPanel {
   openTestBench() {
     this.el.querySelector('[data-chip-testbench-modal]').hidden = false;
     this.renderTestBenchSteps();
+    this.renderTestLabChecks();
+  }
+
+  renderTestLabChecks() {
+    const panel = this.el.querySelector('[data-testlab-check-results]');
+    if (!panel) return;
+    const findings = this.analyzeDesign();
+    this.ensurePhysicalPlacements();
+    const die = this.physicalDieRect();
+    const cell = this.physicalCellSize(die);
+    const physicalPositions = this.nodes.map((node) => ({
+      node,
+      x: die.x + this.physicalLayout.placements[node.id].x * die.width,
+      y: die.y + this.physicalLayout.placements[node.id].y * die.height
+    }));
+    for (let left = 0; left < physicalPositions.length; left += 1) {
+      for (let right = left + 1; right < physicalPositions.length; right += 1) {
+        const a = physicalPositions[left], b = physicalPositions[right];
+        if (Math.abs(a.x - b.x) < cell.width && Math.abs(a.y - b.y) < cell.height) {
+          findings.push({ severity: 'warning', message: `Placement preview cells "${a.node.label}" and "${b.node.label}" overlap.` });
+        }
+      }
+    }
+    const errors = findings.filter(({ severity }) => severity === 'error').length;
+    const warnings = findings.filter(({ severity }) => severity === 'warning').length;
+    const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
+    const simulation = this.evaluate();
+    const unresolvedOutputs = outputs.filter((node) => simulation.unresolved.has(node.id)).length;
+    const completed = this.testBench.steps.filter((step) => typeof step.result === 'boolean');
+    const passed = completed.filter((step) => step.result).length;
+    const overview = `<p class="chip-diagnostic ${errors ? 'error' : warnings ? 'warning' : 'success'}">${errors ? `${errors} error${errors === 1 ? '' : 's'}` : 'No logic errors'} · ${warnings} warning${warnings === 1 ? '' : 's'} · ${unresolvedOutputs} unresolved output${unresolvedOutputs === 1 ? '' : 's'} · test vectors ${passed}/${completed.length} passed</p>`;
+    panel.innerHTML = overview + (findings.length ? findings.slice(0, 12).map(({ severity, message }) =>
+      `<p class="chip-diagnostic ${severity}">${escapeHTML(message)}</p>`
+    ).join('') : '<p class="chip-diagnostic success">All current design checks passed.</p>');
   }
 
   addTestBenchStep() {
@@ -2429,6 +2678,7 @@ export class ChipLabPanel {
     const summary = `${passed}/${this.testBench.steps.length} tests passed`;
     this.el.querySelector('[data-testbench-result]').textContent = summary;
     this.renderTestBenchResults();
+    this.renderTestLabChecks();
     this.setStatus(`Test bench "${this.testBench.name}" complete · ${summary}.`);
   }
 
@@ -2652,6 +2902,68 @@ export class ChipLabPanel {
     }).join('');
     this.el.querySelector('[data-chip-empty]').hidden = this.nodes.length > 0;
     this.el.querySelector('[data-chip-count]').textContent = `${this.nodes.length} components · ${this.wires.length} nets`;
+  }
+
+  setViewMode(mode) {
+    this.viewMode = mode === 'physical' ? 'physical' : 'logic';
+    this.el.querySelector('[data-chip-logic-view]').hidden = this.viewMode !== 'logic';
+    this.el.querySelector('[data-chip-physical-view]').hidden = this.viewMode !== 'physical';
+    this.el.querySelector('[data-chip-action="logic-view"]').classList.toggle('active', this.viewMode === 'logic');
+    this.el.querySelector('[data-chip-action="physical-view"]').classList.toggle('active', this.viewMode === 'physical');
+    this.el.querySelector('[data-chip-action="logic-view"]').setAttribute('aria-pressed', String(this.viewMode === 'logic'));
+    this.el.querySelector('[data-chip-action="physical-view"]').setAttribute('aria-pressed', String(this.viewMode === 'physical'));
+    this.el.querySelector('[data-chip-grid-label]').textContent = this.viewMode === 'logic' ? 'GRID 20 px' : 'DIE PLACEMENT';
+    this.renderPhysicalCanvas();
+    if (this.viewMode === 'physical') this.setStatus('Drag conceptual cells to arrange the placement preview.');
+  }
+
+  renderPhysicalCanvas() {
+    const canvas = this.el.querySelector('.chip-physical-canvas');
+    if (!canvas) return;
+    const size = canvas.parentElement.querySelector('[data-physical-die-size]');
+    if (size) size.textContent = `${this.physicalLayout.widthMm.toFixed(2)} mm × ${this.physicalLayout.heightMm.toFixed(2)} mm`;
+    this.ensurePhysicalPlacements();
+    const die = this.physicalDieRect();
+    const cell = this.physicalCellSize(die);
+    const dieOutline = canvas.querySelector('[data-physical-die]');
+    dieOutline.setAttribute('x', die.x);
+    dieOutline.setAttribute('y', die.y);
+    dieOutline.setAttribute('width', die.width);
+    dieOutline.setAttribute('height', die.height);
+    const pointFor = (node) => {
+      const position = this.physicalLayout.placements[node.id] || { x: 0.5, y: 0.5 };
+      return { x: die.x + position.x * die.width, y: die.y + position.y * die.height };
+    };
+    canvas.querySelector('[data-physical-wires]').innerHTML = this.wires.map((wire) => {
+      const source = this.nodes.find((node) => node.id === wire.from);
+      const target = this.nodes.find((node) => node.id === wire.to);
+      if (!source || !target) return '';
+      const a = pointFor(source), b = pointFor(target);
+      const midX = (a.x + b.x) / 2;
+      const d = wire.route === 'straight' ? `M ${a.x} ${a.y} L ${b.x} ${b.y}` : `M ${a.x} ${a.y} L ${midX} ${a.y} L ${midX} ${b.y} L ${b.x} ${b.y}`;
+      return `<path class="physical-route" d="${d}"/>`;
+    }).join('');
+    canvas.querySelector('[data-physical-nodes]').innerHTML = this.nodes.map((node) => {
+      const { x, y } = pointFor(node);
+      const selected = this.selectedNodeId === node.id;
+      const title = node.label.length > 20 ? `${node.label.slice(0, 19)}…` : node.label;
+      return `<g class="physical-cell ${selected ? 'selected' : ''} ${node.type.toLowerCase()}" data-physical-node data-node-id="${escapeHTML(node.id)}" tabindex="0" role="button" aria-label="Move ${escapeHTML(node.label)}"><rect x="${x - cell.width / 2}" y="${y - cell.height / 2}" width="${cell.width}" height="${cell.height}" rx="8"/><text class="physical-cell-kind" x="${x}" y="${y - 7}">${escapeHTML(node.type)}</text><text class="physical-cell-label" x="${x}" y="${y + 12}">${escapeHTML(title)}</text></g>`;
+    }).join('');
+  }
+
+  physicalDieRect() {
+    const frame = { x: 70, y: 42, width: 1060, height: 656 };
+    const aspect = this.physicalLayout.widthMm / this.physicalLayout.heightMm;
+    let width = frame.width, height = width / aspect;
+    if (height > frame.height) {
+      height = frame.height;
+      width = height * aspect;
+    }
+    return { x: frame.x + (frame.width - width) / 2, y: frame.y + (frame.height - height) / 2, width, height };
+  }
+
+  physicalCellSize(die = this.physicalDieRect()) {
+    return { width: Math.max(12, Math.min(110, die.width * 0.16)), height: Math.max(12, Math.min(62, die.height * 0.14)) };
   }
 
   inspectPowerRails() {
@@ -3299,6 +3611,7 @@ export class ChipLabPanel {
 
   render() {
     this.renderCanvas();
+    this.renderPhysicalCanvas();
     this.renderCustomChipLibrary();
     this.renderInspector();
     if (!this.el.querySelector('[data-chip-simulation]').hidden) this.renderSimulation();
@@ -3308,8 +3621,7 @@ export class ChipLabPanel {
     this.el.querySelector('[data-chip-status]').textContent = message;
   }
 
-  svgPoint(event) {
-    const svg = this.el.querySelector('.chip-canvas');
+  svgPoint(event, svg = this.el.querySelector('.chip-canvas')) {
     const point = svg.createSVGPoint();
     point.x = event.clientX;
     point.y = event.clientY;
@@ -3495,6 +3807,23 @@ export class ChipLabPanel {
     for (const node of outputs) assignments.push(`  assign ${ports.get(node.id)} = ${readInput(node, 0)};`);
     const moduleName = this.chipName.replace(/[^A-Za-z0-9_$]/g, '_').replace(/^[^A-Za-z_$]/, '_') || 'logic_chip';
     return `// Electro Lab Verilog export. Combinational subset; sequential and custom chips are not included.\nmodule ${moduleName}(${portList.join(', ')});\n${declarations.join('\n')}\n\n${assignments.join('\n')}\nendmodule\n`;
+  }
+
+  downloadVerilog() {
+    const source = this.exportVerilog();
+    if (!source) return false;
+    const blob = new Blob([source], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const filename = `${this.chipName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'logic-chip'}.v`;
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.setStatus(`Exported ${filename}. This is RTL only; synthesis, placement, routing, and PDK verification have not run.`);
+    return true;
   }
 
   async importVerilog(file) {
@@ -3688,9 +4017,10 @@ export class ChipLabPanel {
   exportDesign() {
     const data = {
       format: 'electro-lab-chip-design',
-      version: 4,
+      version: 5,
       designId: this.designId,
       name: this.chipName,
+      physicalLayout: structuredClone(this.physicalLayout),
       components: this.nodes.map(({ id, type, label, note, x, y, value, q, width, addressWidth, phase, memory, definition }) =>
         ({ id, type, label, note, x, y, value, q, width, addressWidth, phase, memory, definition })),
       wires: this.wires,
@@ -3710,7 +4040,7 @@ export class ChipLabPanel {
     if (!file) return;
     try {
       const data = JSON.parse(await file.text());
-      if (data?.format !== 'electro-lab-chip-design' || ![1, 2, 3, 4].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.wires)) {
+      if (data?.format !== 'electro-lab-chip-design' || ![1, 2, 3, 4, 5].includes(data.version) || !Array.isArray(data.components) || !Array.isArray(data.wires)) {
         throw new Error('Unsupported chip design file.');
       }
       const ids = new Set();
@@ -3807,6 +4137,8 @@ export class ChipLabPanel {
         ? { name: savedBench.name.slice(0, 48), steps: structuredClone(savedBench.steps) }
         : { name: 'Untitled test bench', steps: [] };
       this.chipName = typeof data.name === 'string' && data.name.trim() ? data.name.slice(0, 48) : 'Imported Logic Chip';
+      this.physicalLayout = this.normalizePhysicalLayout(data.physicalLayout);
+      this.renderPhysicalLayout();
       this.el.querySelector('[data-chip-name]').value = this.chipName;
       this.el.querySelector('[data-chip-title]').textContent = this.chipName;
       this.selectedNodeId = null;

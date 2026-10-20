@@ -25,6 +25,8 @@ A browser-based 3D workspace for exploring atoms and molecules, building circuit
 
 ## 🧩 Mask Lab
 
+Chip Lab's **EDA Setup** checks whether common local ASIC tools are on `PATH` while running the Vite development server. It currently reports availability only; it does not launch OpenLane or create a physical layout. Verilog export remains a separate, explicit download. The next integration step is a local OpenLane job runner that accepts the in-memory RTL and selected PDK, then returns logs, DRC/LVS results, and GDS to Chip View.
+
 Mask Lab provides separate SKY130, GF180MCU, and process-agnostic educational profiles, each with independent editable layer masks. The 10 nm × 10 nm grid is an editor display raster, not a PDK manufacturing grid.
 
 - Open the workspace selector and choose **Mask Lab**.
@@ -32,8 +34,8 @@ Mask Lab provides separate SKY130, GF180MCU, and process-agnostic educational pr
 - Draw and erase individual pixels on a square grid.
 - Use the arrow keys to move between pixels and Enter or Space to toggle a pixel; only the focused pixel participates in Tab navigation.
 - The educational profile uses 10 nm editor-raster cells, so a 64 × 64 canvas displays 640 nm × 640 nm.
-- In the Educational profile, **Auto-fill from Chip Lab** rasterizes the current schematic's component outlines and routed connections onto the mask grid and records the source design with the export.
-- Use Chip Lab's **Generate Mask** button to create the raster and jump directly to Mask Lab. Changing the grid size keeps pixels at their existing coordinates where they fit; shrinking the grid clips pixels beyond its new edges.
+- In the Educational profile, **Auto-fill from Chip Lab** rasterizes the physical placement preview into conceptual ACTIVE, GATE, and METAL 1 layers; it records the source design and die envelope with the export.
+- Use Chip Lab's **Generate Mask** button to choose the Educational, SKY130, or GF180MCU profile before opening Mask Lab. Educational generates a conceptual preview; selecting a PDK opens its reference layer list without pretending to convert logic gates into foundry geometry. The layer counts shown are editor entries, not manufacturing mask counts. Changing the grid size keeps pixels at their existing coordinates where they fit; shrinking the grid clips pixels beyond its new edges.
 - SKY130 and GF180MCU tabs provide reference layer sets; GF180MCU includes documented GDS layer/datatype, mask number, and polarity metadata where listed by its design manual.
 - Auto-fill from Chip Lab and pattern training are restricted to the process-agnostic educational profile so schematic artwork is not mistaken for a process layout.
 - PDK tabs are educational drafting previews only: they do not run foundry DRC/LVS, implement a PDK grid or full layer map, or export verified GDSII/OASIS. GF180MCU's open PDK currently identifies itself as an experimental preview. Consult the [SKY130 layer reference](https://skywater-pdk.readthedocs.io/en/main/rules/layers.html), [GF180MCU drawn-layer table](https://gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/drm_04_1.html), and [GF180MCU mask-layer numbering](https://gf180mcu-pdk.readthedocs.io/en/latest/physical_verification/design_manual/drm_04_3.html) and use the matching installed PDK/tool flow for physical signoff.
@@ -190,9 +192,12 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
 
 9. **Chip Lab — Digital Logic Design**:
    - Choose **Chip Lab** from the workspace selector to open a dedicated schematic editor.
+   - Set a physical die envelope in millimeters in the **Physical Envelope** strip. Switch between the **Logic** schematic and **Physical** placement view; drag conceptual cells inside the die boundary. Dimensions and cell placements are saved with projects and version 5 `.chip.json` files.
+   - Open **Test Lab** to run logic design checks, review placement-preview cell overlaps, and run saved test vectors. These checks do not validate foundry design rules, mask geometry, timing, or silicon behavior.
    - Build with scalar Boolean gates, constants, clock sources, rising-edge D/SR flip-flops, bus registers, enabled counters, clock dividers, and a four-word synchronous RAM.
    - Use 2/4/8-bit bus inputs and outputs, splitters/joiners, bitwise logic, multiplexers, adders with carry-in/out, comparators, and configurable 2-to-4, 3-to-8, or 4-to-16 decoders. Bus connections must match in width; splitter bit 0 is the least-significant bit.
    - Simulate combinational logic live, manually pulse or automatically run clocked logic, set the clock period, and inspect signal waveforms (up to 48 captured transitions).
+   - **Export Verilog** downloads a `.v` RTL file for supported combinational designs. This is the handoff to an external synthesis flow; Chip Lab does not run Yosys/OpenLane or create PDK geometry.
    - Use the clock-edge debugger to step one rising edge at a time, inspect register/counter/RAM state, pause automatic clocking, and review the latest state changes. Add signal watches from the component inspector and set sequential breakpoints to pause automatic clocking when a component changes state. Click a waveform row or watch entry to select its component on the schematic.
    - Run circuit checks for floating inputs, undriven outputs, incompatible nets, unresolved feedback, and unused logic. **Undo/Redo** restores the schematic, project identity, and its test bench. Search the **Find** box for component names, types, or signal labels to select and focus an item. Multi-select components to align or evenly distribute them, or drag a selected component to move the group together. Use **Tidy**, **Fit view**, mouse-wheel zoom, and middle/right-drag pan to edit and navigate schematics. Add design notes to components, optionally auto-name new nets, and follow signal direction arrows. Select wires to assign labels, curved/orthogonal/straight routing, and signal probes; probed wires focus the waveform viewer.
    - Copy and paste selected components with **Ctrl+C / Ctrl+V** (including connections internal to a multi-selection). Toggle **Snap: On/Off** to move components on or off the 20-unit design grid.
@@ -203,7 +208,7 @@ The editor maintains a history stack of **up to 100 steps** for all operations:
    - Build a one-hot finite-state machine by listing states and guarded transitions (`FROM, SIGNAL, TO`; use `*` for unconditional transitions). The builder generates D flip-flops, state output pins, and combinational next-state logic; every transition advances on a rising clock edge.
    - Reference examples include half/full adders, an enabled 4-bit counter, a traffic-light state machine, a 4-bit accumulator, and a synchronous 4 × 4 RAM demonstration.
    - The **Learning path** provides five guided challenges: AND logic, half adders, bus multiplexers, decoders, and clocked registers. Starting a challenge loads unwired components; progressive hints are optional, and the circuit checker records attempts, best scores, and completion locally. Pass a challenge to jump directly into the next one.
-   - Import/export editable `.chip.json` designs for sharing. Version 4 includes component state, RAM contents, test benches, and wire labels/routing; versions 1–3 remain importable.
+   - Import/export editable `.chip.json` designs for sharing. Version 5 includes the physical die envelope and cell placements; version 4 includes component state, RAM contents, test benches, and wire labels/routing; versions 1–3 remain importable.
    - Import a deliberately limited Verilog subset: one module with a plain port list, separate scalar or 2/4/8-bit declarations, and continuous assignments using Boolean/vector operators, literals, and conditional expressions. Sequential `always` blocks, ANSI-style port declarations, and general Verilog are not supported. Export supports only combinational designs and reports unsupported components instead of silently omitting them.
    - Clocked behavior is a functional digital-logic simulation, not a physical silicon, propagation-delay, or electrical model.
 =======
