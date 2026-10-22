@@ -43,7 +43,9 @@ export function buildGdsVectorPreview(input, options = {}) {
         color: colorFor(element.layer),
         polygons: '',
         strokes: new Map(),
-        shapes: 0
+        shapes: 0,
+        // Per-layer tight bounding box accumulated from element points.
+        bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
       };
       layerMap.set(key, layer);
     }
@@ -61,12 +63,17 @@ export function buildGdsVectorPreview(input, options = {}) {
       bounds.minY = Math.min(bounds.minY, y);
       bounds.maxX = Math.max(bounds.maxX, x);
       bounds.maxY = Math.max(bounds.maxY, y);
+      layer.bounds.minX = Math.min(layer.bounds.minX, x);
+      layer.bounds.minY = Math.min(layer.bounds.minY, y);
+      layer.bounds.maxX = Math.max(layer.bounds.maxX, x);
+      layer.bounds.maxY = Math.max(layer.bounds.maxY, y);
     }
   }
 
   const layers = [...layerMap.values()].map((layer) => ({
     ...layer,
-    strokes: [...layer.strokes].map(([width, d]) => ({ width, d }))
+    strokes: [...layer.strokes].map(([width, d]) => ({ width, d })),
+    bounds: Number.isFinite(layer.bounds.minX) ? layer.bounds : null
   }));
   const hasBounds = Number.isFinite(bounds.minX);
   const width = hasBounds ? bounds.maxX - bounds.minX : 0;
@@ -75,6 +82,10 @@ export function buildGdsVectorPreview(input, options = {}) {
   const dbuNm = Number.isFinite(units.dbUnitInMeters) ? units.dbUnitInMeters * 1e9 : null;
 
   return {
+    topName: flat.topName || parsed.libraryName || 'Chip Design',
+    libraryName: parsed.libraryName || '',
+    instances: flat.instances,
+    texts: flat.texts,
     pdk: pdk || 'unknown',
     layers,
     bounds: hasBounds ? bounds : null,
