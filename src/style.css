@@ -89,7 +89,8 @@ button, input, select {
   z-index: 2147483647;
   top: 52px;
   left: 56px;
-  width: 190px;
+  width: min(292px, calc(100vw - 72px));
+  box-sizing: border-box;
   max-height: calc(100vh - 68px);
   overflow-y: auto;
   padding: 13px;
@@ -124,15 +125,16 @@ button, input, select {
 }
 .circuit-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .circuit-tools button {
-  padding: 8px 6px; border: 1px solid #344358; border-radius: 6px;
-  background: #202d3d; color: #edf4ff; cursor: pointer; text-align: left;
+  min-width: 0; min-height: 36px; padding: 8px 7px; border: 1px solid #344358; border-radius: 6px;
+  background: #202d3d; color: #edf4ff; cursor: pointer; text-align: left; line-height: 1.25;
 }
 .circuit-tools button:hover { background: #2b4663; border-color: #5c87b4; }
 .circuit-tools .circuit-delete { grid-column: 1 / -1; color: #ffb4b4; }
 .circuit-tools [data-circuit-demo] { grid-column: 1 / -1; border-color: #4b916d; color: #b7f7d0; }
 .circuit-tools .circuit-tool-button { grid-column: 1 / -1; border-color: #426584; }
 .circuit-tools .circuit-tool-button.active { background: #24517a; border-color: #79b8ed; box-shadow: 0 0 0 1px rgba(121, 184, 237, 0.22); }
-.circuit-hint { margin-top: 10px; color: #9eacc0; font-size: 10px; line-height: 1.6; }
+.circuit-hint { display: grid; gap: 7px; margin-top: 10px; color: #9eacc0; font-size: 10px; line-height: 1.5; }
+.circuit-hint [data-circuit-scope] { padding: 8px; border-left: 2px solid #5b86b5; border-radius: 3px; background: rgba(91, 134, 181, 0.12); color: #c4d5e8; }
 
 .chip-lab {
   position: fixed; z-index: 2147483646; inset: 38px 0 0; display: flex; flex-direction: column;
@@ -234,6 +236,7 @@ button, input, select {
 .mask-learning-result { margin-top: 16px; padding: 10px 12px; border-radius: 6px; background: rgba(95, 117, 148, 0.14); color: #bfe2ff; }
 
 @media (max-width: 760px) {
+  .circuit-dock { top: 46px; left: 8px; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 54px); }
   .chip-topbar { gap: 8px 12px; padding: 8px 12px; }
   .chip-brand { min-width: 0; }
   .chip-brand small { display: none; }
@@ -2533,7 +2536,7 @@ button, input, select {
 }
 
 /* ── Mobile adjustments ── */
-@media (max-width: 1100px) {
+@media (max-width: 1350px) {
   .mask-gds-main-stage {
     flex-direction: column;
   }
@@ -2541,22 +2544,18 @@ button, input, select {
     width: 100%;
     border-right: none;
     border-bottom: 1px solid #1a2a40;
-    flex-direction: row;
-    overflow-x: auto;
+    flex-direction: column;
+    overflow: visible;
     padding: 8px 12px;
   }
   .mask-section-navigator .navigator-list {
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
-    overflow-x: auto;
-    flex: 1;
+    overflow: visible;
   }
   .mask-section-navigator .navigator-item {
-    flex: 0 0 auto;
-    min-width: 150px;
-  }
-  .mask-section-navigator .navigator-footer {
-    display: none;
+    min-width: 0;
   }
 }
 @media (max-width: 760px) {
@@ -2565,6 +2564,7 @@ button, input, select {
   .mask-gds-canvas { height: 52vh; min-height: 260px; }
   .mask-gds-analysis-sidebar { width: 100%; }
   .mask-section-navigator { width: 100%; }
+  .mask-section-navigator .navigator-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 .mask-analysis-panel {
@@ -2916,7 +2916,7 @@ button, input, select {
   max-height: calc(100vh - 80px);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1350px) {
   .mask-gds-analysis-dashboard {
     grid-template-columns: 1fr;
   }

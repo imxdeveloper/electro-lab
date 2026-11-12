@@ -204,26 +204,26 @@ export class Editor {
     this.circuitDock.className = 'circuit-dock';
     this.circuitDock.innerHTML = `
       <div class="circuit-dock-heading">
-        <div class="circuit-dock-title">Lab Switcher</div>
-        <button class="circuit-collapse-all" type="button" aria-expanded="true" title="Minimize lab panel">âˆ’</button>
+        <div class="circuit-dock-title">Circuit Lab</div>
+        <button class="circuit-collapse-all" type="button" aria-expanded="true" title="Minimize Circuit Lab panel">-</button>
       </div>
       <div class="circuit-dock-content">
         <section class="circuit-section">
-          <h2><span>Workspace</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-workspace-controls" title="Minimize workspace controls">âˆ’</button></h2>
+          <h2><span>Workspace</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-workspace-controls" title="Minimize workspace controls">-</button></h2>
           <label id="circuit-workspace-controls" class="circuit-mode-control">
             <select aria-label="Workspace mode"><option value="atoms">Atom Lab</option><option value="chipview">Chip View</option><option value="circuits">Circuit Lab</option><option value="chips">Chip Lab</option></select>
           </label>
         </section>
         <section class="circuit-section circuit-only-section">
-          <h2><span>Components</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-component-controls" title="Minimize components">âˆ’</button></h2>
+          <h2><span>Components</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-component-controls" title="Minimize components">-</button></h2>
           <div class="circuit-tools" id="circuit-component-controls" aria-label="Circuit components">
-            <button data-circuit="battery">ï¼‹ Battery</button>
+            <button data-circuit="battery">Add battery</button>
             <button data-circuit="voltageSource">V Source</button>
-            <button data-circuit="resistor">ï¼‹ Resistor</button>
-            <button data-circuit="led">ï¼‹ LED</button>
-            <button data-circuit-demo="led">Build LED Circuit</button>
-            <button data-circuit="switch">ï¼‹ Switch</button>
-            <button data-circuit="wire">ï¼‹ Wire</button>
+            <button data-circuit="resistor">Add resistor</button>
+            <button data-circuit="led">Add LED</button>
+            <button data-circuit-demo="led">Build LED circuit</button>
+            <button data-circuit="switch">Add switch</button>
+            <button data-circuit="wire">Add wire</button>
             <button data-circuit="pmosMosfet">P-Channel MOSFET</button>
             <button data-circuit="nmosMosfet">N-Channel MOSFET</button>
             <button data-circuit="npnTransistor">NPN Transistor</button>
@@ -232,16 +232,22 @@ export class Editor {
             <button data-circuit="inductor">Inductor</button>
             <button data-circuit="ground">Ground</button>
             <button class="circuit-tool-button" data-circuit-tool="selectObjects">Select objects</button>
-            <button class="circuit-tool-button" data-circuit-tool="placeNode">＋ Place connection point</button>
+            <button class="circuit-tool-button" data-circuit-tool="placeNode">Place connection point</button>
             <button class="circuit-tool-button" data-circuit-tool="connectNodes">Connect two points</button>
             <button class="circuit-delete" data-circuit-delete>Delete selected</button>
           </div>
         </section>
         <section class="circuit-section circuit-only-section">
-          <h2><span>Controls</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-hint" title="Minimize controls">âˆ’</button></h2>
+          <h2><span>Controls</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-hint" title="Minimize controls">-</button></h2>
           <button class="circuit-save-model" type="button" data-circuit-save-model>Save 3D circuit (GLB)</button>
-          <div class="circuit-tool-status" data-circuit-tool-status>Connection tools are off.</div>
-          <div class="circuit-hint" id="circuit-hint">Shift + A to add parts<br>Shift-click two terminals, then F to join them straight<br>Select one terminal, point into the scene, then Shift + F to add and connect another<br>Close the V+ to V− loop to light wires and show estimated current (+ to −)<br>Set resistor ohms in Properties to update the current estimate<br>F2 show / hide this panel</div>
+          <div class="circuit-tool-status" data-circuit-tool-status role="status" aria-live="polite">Connection tools are off.</div>
+          <div class="circuit-hint" id="circuit-hint">
+            <span>Shift + A adds parts. Shift-click two terminals, then F to connect them.</span>
+            <span>Select one terminal, point into the scene, then Shift + F to add and connect another.</span>
+            <span>Close a V+ to V- loop to light wires and show estimated current. Set resistor ohms in Properties.</span>
+            <span data-circuit-scope>Circuit Lab shows visual connections and simple current estimates; it does not simulate GDS layouts or transistor-level behavior. Use Chip Lab for logic designs.</span>
+            <span>F2 shows or hides this panel.</span>
+          </div>
         </section>
       </div>
     `;
@@ -520,7 +526,7 @@ export class Editor {
         const content = this.circuitDock.querySelector(`#${button.getAttribute('aria-controls')}`);
         const expanded = button.getAttribute('aria-expanded') === 'true';
         button.setAttribute('aria-expanded', String(!expanded));
-        button.textContent = expanded ? '+' : 'âˆ’';
+        button.textContent = expanded ? '+' : '-';
         button.title = `${expanded ? 'Expand' : 'Minimize'} ${button.closest('h2').querySelector('span').textContent.toLowerCase()}`;
         content.hidden = expanded;
       });
@@ -529,7 +535,7 @@ export class Editor {
       const button = event.currentTarget;
       const minimized = this.circuitDock.classList.toggle('minimized');
       button.setAttribute('aria-expanded', String(!minimized));
-      button.textContent = minimized ? '+' : 'âˆ’';
+      button.textContent = minimized ? '+' : '-';
       button.title = minimized ? 'Expand Circuit Lab panel' : 'Minimize Circuit Lab panel';
     });
     window.addEventListener('mousemove', (e) => {

@@ -352,3 +352,33 @@ test('Chip View sends actual GDS layers to the vector viewer in Mask Lab', async
   await viewer.locator('[data-mask-gds-zoom="in"]').click();
   await expect.poll(() => svg.getAttribute('viewBox')).not.toBe(initialView);
 });
+
+test('Circuit Lab toolbox fits the viewport and the LED demo simulates current flow', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('circuits');
+  const dock = page.locator('.circuit-dock');
+  await expect(dock).toBeVisible();
+  await expect(dock.locator('.circuit-dock-title')).toHaveText('Circuit Lab');
+  await expect(dock.locator('[data-circuit-scope]')).toContainText('does not simulate GDS layouts');
+  await expect(dock.getByRole('button', { name: 'Add battery' })).toBeVisible();
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const bounds = await dock.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: rect.width };
+  });
+  expect(bounds.left).toBeGreaterThanOrEqual(0);
+  expect(bounds.right).toBeLessThanOrEqual(390);
+  expect(bounds.top).toBeGreaterThanOrEqual(0);
+  expect(bounds.bottom).toBeLessThanOrEqual(844);
+
+  await dock.getByRole('button', { name: 'Build LED circuit' }).click();
+  const demoState = () => page.evaluate(() => {
+    const objects = window.electroDesignerEditor.sceneManager.objectsList;
+    const led = objects.find((object) => object.userData.circuitComponent === 'led');
+    const activeWires = objects.filter((object) =>
+      object.userData.circuitConnection && object.material.emissive.getHex() === 0xff4a08
+    ).length;
+    return { ledOn: led?.userData.ledOn, activeWires };
+  });
+  await expect.poll(demoState).toEqual({ ledOn: true, activeWires: 2 });
+});

@@ -1037,7 +1037,25 @@ export class MaskLabPanel {
     const pinMap = [];
 
     if (preview.texts && Array.isArray(preview.texts)) {
-      for (const t of preview.texts) {
+      const topLabels = new Map();
+      for (const text of preview.texts) {
+        if (text.instanceId != null || (preview.topName && text.structure && text.structure !== preview.topName)) continue;
+        const label = (text.string || '').trim();
+        if (!label) continue;
+        const point = text.points?.[0] || [minX + widthDbu / 2, maxY];
+        const boundaryDistance = Math.min(
+          Math.abs(point[0] - minX),
+          Math.abs(maxX - point[0]),
+          Math.abs(point[1] - minY),
+          Math.abs(maxY - point[1])
+        );
+        const key = label.toLowerCase();
+        if (!topLabels.has(key) || boundaryDistance < topLabels.get(key).boundaryDistance) {
+          topLabels.set(key, { text, boundaryDistance });
+        }
+      }
+
+      for (const { text: t } of topLabels.values()) {
         const str = (t.string || '').trim();
         if (!str) continue;
         const pt = t.points?.[0] || [minX + widthDbu / 2, maxY];
@@ -1050,8 +1068,8 @@ export class MaskLabPanel {
         if (/^(?:clk|clock|gclk|sys_clk)/i.test(str) && !detectedClocks.includes(str)) detectedClocks.push(str);
         else if (/^(?:rst|reset|clr|clear|nrst)/i.test(str) && !detectedResets.includes(str)) detectedResets.push(str);
         else if (/^(?:vdd|vss|gnd|vcc|vdda|vssa)/i.test(str) && !detectedPower.includes(str)) detectedPower.push(str);
-        else if (/^(?:q|out|dout|result|y|sum|cout)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) && !detectedOutputs.some((p) => p.name === str)) detectedOutputs.push(pinObj);
-        else if (/^(?:d|in|din|a|b|cin|sel|en|enable|load)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) && !detectedInputs.some((p) => p.name === str)) detectedInputs.push(pinObj);
+        else if ((/^(?:q|out|dout|result|y|sum|cout)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) || (isCounter && /^count\[\d+\]$/i.test(str))) && !detectedOutputs.some((p) => p.name === str)) detectedOutputs.push(pinObj);
+        else if ((/^(?:d|in|din|a|b|cin|sel|en|enable|load)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) || (isCounter && /^count_next\[\d+\]$/i.test(str))) && !detectedInputs.some((p) => p.name === str)) detectedInputs.push(pinObj);
       }
     }
 
@@ -1094,6 +1112,12 @@ export class MaskLabPanel {
         yUm: heightUm.toFixed(2)
       };
     });
+    const counterBits = outputs.map(({ name }) => name.match(/^(?:Q|count)\[?(\d+)\]?$/i))
+      .filter(Boolean)
+      .map((match) => Number(match[1]));
+    const outputRangeLabel = isCounter && counterBits.length
+      ? `count[${Math.max(...counterBits)}:${Math.min(...counterBits)}]`
+      : outputs.length ? `${outputs[0].name} – ${outputs[outputs.length - 1].name}` : 'Outputs';
 
     // 4. Layer Stack Inventory
     const activeLayers = (preview.layers || []).map((layer) => ({
@@ -1109,16 +1133,17 @@ export class MaskLabPanel {
     const instances = Array.isArray(preview.instances) ? preview.instances : [];
     const instanceEvidence = {
       buffers: { pattern: /(?:^|__)(?:buf|inv)[a-z0-9]*_/i, label: 'buffer / inverter cell-name matches' },
-      xor: { pattern: /(?:^|__)(?:xor|xnor)[a-z0-9]*_/i, label: 'XOR / XNOR cell-name matches' },
-      and: { pattern: /(?:^|__)(?:and|nand|aoi|oai)[a-z0-9]*_/i, label: 'AND / NAND cell-name matches' },
+      xor: { pattern: /(?:^|__)(?:xor|xnor|or|nor|mux)[a-z0-9]*_/i, label: 'XOR / XNOR / OR / NOR cell-name matches' },
+      and: { pattern: /(?:^|__)(?:and|nand|aoi|oai)[a-z0-9]*_/i, label: 'AND / NAND / AOI / OAI cell-name matches' },
       clock: { pattern: /(?:^|__)(?:clkbuf|clkinv|clkdlybuf)[a-z0-9]*_/i, label: 'clock-buffer cell-name matches' },
       sequential: { pattern: /(?:^|__)(?:df|dff|sdff|sdf|dl|latch|ff)[a-z0-9]*_/i, label: 'sequential-cell name matches' },
-      physical: { pattern: /(?:^|__)(?:tap|welltap|decap|fill)[a-z0-9]*_/i, label: 'tap / decap / fill cell-name matches' }
+      physical: { pattern: /(?:^|__)(?:tap|welltap|decap|filltie|tiehi|tielo)[a-z0-9]*(?:_|$)/i, label: 'tap / decap / tie-cell name matches' }
     };
     for (const evidence of Object.values(instanceEvidence)) {
       evidence.count = 0;
       evidence.placedCount = 0;
       evidence.bounds = null;
+      evidence.boxes = [];
       for (const instance of instances) {
         if (!evidence.pattern.test(instance.name || '')) continue;
         evidence.count += 1;
@@ -1130,6 +1155,7 @@ export class MaskLabPanel {
         const top = Math.min(maxY, box.maxY);
         if (right <= left || top <= bottom) continue;
         evidence.placedCount += 1;
+        evidence.boxes.push({ minX: left, minY: bottom, maxX: right, maxY: top, name: instance.name });
         if (!evidence.bounds) evidence.bounds = { minX: left, minY: bottom, maxX: right, maxY: top };
         else {
           evidence.bounds.minX = Math.min(evidence.bounds.minX, left);
@@ -1138,6 +1164,7 @@ export class MaskLabPanel {
           evidence.bounds.maxY = Math.max(evidence.bounds.maxY, top);
         }
       }
+      instanceEvidence.xor.xorCount = instances.filter(({ name }) => /(?:^|__)(?:xor|xnor)[a-z0-9]*_/i.test(name || '')).length;
     }
     const sequentialInstanceCount = instanceEvidence.sequential.count;
 
@@ -1150,7 +1177,7 @@ export class MaskLabPanel {
         id: 'sec-1-output-buffer',
         number: 1,
         name: 'Output Buffer',
-        sub: isCounter ? 'Q7 – Q0' : `${outputs[0]?.name || 'OUT0'} – ${outputs[outputs.length - 1]?.name || 'OUTN'}`,
+        sub: outputRangeLabel,
         color: '#168bff',
         evidence: instanceEvidence.buffers,
         // Top boundary where output routing and buffer drivers reside
@@ -1169,7 +1196,11 @@ export class MaskLabPanel {
         id: 'sec-2-next-state-logic',
         number: 2,
         name: isAlu ? 'Function Select / ALU Logic' : 'Next-State Logic',
-        sub: isAlu ? 'Mux / Opcode Matrix' : isCounter ? 'XOR / Inverters' : 'Combinational Logic Cloud',
+        sub: isCounter && instanceEvidence.xor.count
+          ? instanceEvidence.xor.xorCount
+            ? `${instanceEvidence.xor.xorCount} XOR / XNOR matches`
+            : `${instanceEvidence.xor.count} OR / NOR matches · no XOR cells`
+          : isAlu ? 'Mux / Opcode Matrix' : isCounter ? 'No named XOR cells · candidate zone' : 'Combinational Logic Cloud',
         color: '#00d878',
         evidence: instanceEvidence.xor,
         yMinFrac: 0.727,
@@ -1190,8 +1221,8 @@ export class MaskLabPanel {
       {
         id: 'sec-3-carry-logic',
         number: 3,
-        name: isAlu ? 'Fast Carry Lookahead / Adder' : 'Carry Logic',
-        sub: isAlu ? 'CLA Generator' : 'AND / NAND Chains',
+        name: isAlu ? 'Fast Carry Lookahead / Adder' : 'Carry / Boolean Logic',
+        sub: isAlu ? 'CLA candidate · connectivity not traced' : 'AND / NAND / AOI / OAI candidates',
         color: '#ffad16',
         evidence: instanceEvidence.and,
         yMinFrac: 0.582,
@@ -1250,8 +1281,8 @@ export class MaskLabPanel {
       {
         id: 'sec-6-power-ground-rails',
         number: 6,
-        name: 'Power / Ground Rails',
-        sub: 'VDD / GND Grid & Taps',
+        name: 'Power / Tie Cells',
+        sub: 'VDD / GND Tie-Cell Candidates',
         color: '#00dce7',
         evidence: instanceEvidence.physical,
         yMinFrac: 0.0,
@@ -1282,6 +1313,15 @@ export class MaskLabPanel {
       const secHeightUm = secHeightDbu * scaleUm;
       const secAreaUm2 = secWidthUm * secHeightUm;
       const percentArea = ((secAreaUm2 / Math.max(dieAreaUm2, 0.001)) * 100).toFixed(1);
+      const instanceBoxes = spec.evidence.boxes;
+      const focusBox = instanceBoxes.length
+        ? instanceBoxes.reduce((nearest, box) => {
+          const centerX = (box.minX + box.maxX) / 2;
+          const centerY = (box.minY + box.maxY) / 2;
+          const distance = Math.hypot(centerX - (secMinX + secMaxX) / 2, centerY - (secMinY + secMaxY) / 2);
+          return !nearest || distance < nearest.distance ? { box, distance } : nearest;
+        }, null).box
+        : null;
       const secLayers = [];
       for (const l of activeLayers) {
         if (!l.bounds) continue;
@@ -1312,6 +1352,12 @@ export class MaskLabPanel {
         layers: secLayers,
         instanceCount: spec.evidence.count,
         placedInstanceCount: spec.evidence.placedCount,
+        instanceBoxes,
+        focus: focusBox ? {
+          x: (focusBox.minX + focusBox.maxX) / 2,
+          y: (focusBox.minY + focusBox.maxY) / 2
+        } : null,
+        calloutY: minY + heightDbu * (spec.yMinFrac + spec.yMaxFrac) / 2,
         evidenceLabel: spec.evidence.label,
         boundsSource: sourceBounds ? 'placed-cell bounds' : 'coordinate guide'
       };
@@ -1405,10 +1451,11 @@ export class MaskLabPanel {
     inspectorBody.querySelector('[data-inspector-props]').innerHTML = `
       <div class="prop-row"><span>Zone bounds</span><strong>[${sec.boundsUm.minX}, ${sec.boundsUm.minY}] → [${sec.boundsUm.maxX}, ${sec.boundsUm.maxY}] µm</strong></div>
       <div class="prop-row"><span>Zone size</span><strong>${sec.boundsUm.width} µm × ${sec.boundsUm.height} µm</strong></div>
-      <div class="prop-row"><span>Overlay area</span><strong>${sec.boundsUm.area} µm² (${sec.percentArea}% of die)</strong></div>
+      <div class="prop-row"><span>Bounding extent</span><strong>${sec.boundsUm.area} µm² (${sec.percentArea}% of die)</strong></div>
       <div class="prop-row"><span>Cell-name matches</span><strong>${sec.instanceCount}</strong></div>
       <div class="prop-row"><span>Located cell bounds</span><strong>${sec.placedInstanceCount}</strong></div>
       <div class="prop-row"><span>Zone basis</span><strong>${escapeHTML(sec.boundsSource)}</strong></div>
+      ${sec.instanceBoxes.length ? '<div class="prop-row"><span>Display</span><strong>Separate placed-cell boxes</strong></div>' : ''}
     `;
     inspectorBody.querySelector('[data-inspector-layers]').innerHTML = (sec.layers.length
       ? sec.layers.map((layer) => `<span class="layer-pill" style="border-left-color:${layer.color}">${escapeHTML(layer.name)}</span>`).join('')
@@ -1509,10 +1556,11 @@ export class MaskLabPanel {
         </li>
       `).join('');
 
-      const outputItems = analysis.outputs.map((out, idx) => {
-        const bitMatch = out.name.match(/^Q(\d+)$/i);
-        const isMsb = analysis.isCounter && bitMatch && Number(bitMatch[1]) === Math.max(...analysis.outputs.map(({ name }) => Number(name.match(/^Q(\d+)$/i)?.[1] || 0)));
-        const isLsb = analysis.isCounter && bitMatch && Number(bitMatch[1]) === 0;
+      const outputItems = analysis.outputs.map((out) => {
+        const bitMatch = out.name.match(/^(?:Q|count)\[?(\d+)\]?$/i);
+        const bitIndex = bitMatch ? Number(bitMatch[1]) : null;
+        const isMsb = analysis.isCounter && bitIndex !== null && bitIndex === Math.max(...analysis.outputs.map(({ name }) => Number(name.match(/(?:Q|count)\[?(\d+)\]?/i)?.[1] || 0)));
+        const isLsb = analysis.isCounter && bitIndex === 0;
         return `
           <span class="output-item ${isMsb ? 'msb' : ''} ${isLsb ? 'lsb' : ''}">
             <strong>${escapeHTML(out.name)}</strong>
@@ -1540,7 +1588,7 @@ export class MaskLabPanel {
             </div>
           </div>
           <div class="section-card-meta">
-            <span class="meta-tag">Zone area: ${g.boundsUm.area} µm² (${g.percentArea}% of die)</span>
+            <span class="meta-tag">Bounding extent: ${g.boundsUm.area} µm² (${g.percentArea}% of die)</span>
             <span class="meta-tag">${g.instanceCount ? `${g.placedInstanceCount} placed-cell bounds · ${escapeHTML(g.evidenceLabel)}` : `No cell match · ${escapeHTML(g.boundsSource)}`}</span>
           </div>
           <p class="section-card-definition">${escapeHTML(g.definition)}</p>
@@ -1625,9 +1673,16 @@ export class MaskLabPanel {
     // Default: Synchronous Counter / State Machine architecture diagram
     const numOutputs = Math.min(8, Math.max(4, analysis.outputs.length));
     const step = 328 / numOutputs;
+    const schematicOutputs = analysis.isCounter
+      ? [...analysis.outputs].sort((a, b) => {
+        const bitA = Number(a.name.match(/(?:Q|count)\[?(\d+)\]?/i)?.[1] || 0);
+        const bitB = Number(b.name.match(/(?:Q|count)\[?(\d+)\]?/i)?.[1] || 0);
+        return bitB - bitA;
+      })
+      : analysis.outputs;
     const ffBlocksHtml = Array.from({ length: numOutputs }, (_, idx) => {
       const x = 64 + idx * step;
-      const bitName = analysis.outputs[idx]?.name || `Q${numOutputs - 1 - idx}`;
+      const bitName = schematicOutputs[idx]?.name || `Q${numOutputs - 1 - idx}`;
       const ffName = `FF${numOutputs - 1 - idx}`;
       return `
         <line x1="${x + step / 2}" y1="62" x2="${x + step / 2}" y2="78" stroke="#168bff" stroke-width="1.3" />
@@ -1636,7 +1691,7 @@ export class MaskLabPanel {
         <text x="${x + step / 2}" y="103" fill="#ffffff" font-size="8.5" font-weight="700" text-anchor="middle">${ffName}</text>
         <text x="${x + step / 2}" y="118" fill="#8aafc8" font-size="8" font-weight="600" text-anchor="middle">Q</text>
         <line x1="${x + step / 2}" y1="126" x2="${x + step / 2}" y2="142" stroke="#168bff" stroke-width="1.3" />
-        <text x="${x + step / 2}" y="154" fill="#c8ddf0" font-size="9" font-weight="700" text-anchor="middle">${bitName}</text>
+        <text x="${x + step / 2}" y="154" fill="#c8ddf0" font-size="9" font-weight="700" text-anchor="middle">${escapeHTML(bitName)}</text>
       `;
     }).join('');
 
@@ -1718,8 +1773,26 @@ export class MaskLabPanel {
       const rh = Math.max(secMaxY - secMinY, 1);
       const rx = secMinX;
       const ry = -secMaxY;
+      const targetX = spec.focus?.x ?? rx;
+      const targetSvgY = spec.focus ? -spec.focus.y : ry + rh / 2;
 
-      if (spec.isMultiTier && spec.boundsSource !== 'placed-cell bounds') {
+      if (spec.instanceBoxes?.length) {
+        spec.instanceBoxes.forEach((box) => {
+          const cellRect = document.createElementNS(svgNamespace, 'rect');
+          cellRect.setAttribute('class', 'mask-gds-section-rect mask-gds-instance-box');
+          cellRect.setAttribute('x', String(box.minX));
+          cellRect.setAttribute('y', String(-box.maxY));
+          cellRect.setAttribute('width', String(Math.max(box.maxX - box.minX, 1)));
+          cellRect.setAttribute('height', String(Math.max(box.maxY - box.minY, 1)));
+          cellRect.setAttribute('fill', spec.color);
+          cellRect.setAttribute('fill-opacity', '0.18');
+          cellRect.setAttribute('stroke', spec.color);
+          cellRect.setAttribute('stroke-width', String(strokeW * 0.9));
+          cellRect.setAttribute('rx', String(strokeW * 0.55));
+          cellRect.setAttribute('aria-hidden', 'true');
+          groupEl.appendChild(cellRect);
+        });
+      } else if (spec.isMultiTier) {
         const tierH = rh / 3;
         const tiers = [
           { yOff: 0, xOff: 0.0, w: 1.0 },
@@ -1825,8 +1898,7 @@ export class MaskLabPanel {
       const calloutRightX = calloutLeftX + calloutW;
 
       // Vertical center in SVG space
-      const targetSvgY = ry + rh / 2;
-      const calloutCenterSvgY = targetSvgY;
+      const calloutCenterSvgY = -spec.calloutY;
       const calloutTopSvgY = calloutCenterSvgY - calloutH / 2;
 
       // Angled leader line straight to physical edge of this section
@@ -1834,9 +1906,9 @@ export class MaskLabPanel {
       const p0y = calloutCenterSvgY;
       const p1x = calloutRightX + svgW * 0.022;
       const p1y = calloutCenterSvgY;
-      const p2x = rx - svgW * 0.015;
+      const p2x = targetX - svgW * 0.015;
       const p2y = targetSvgY;
-      const p3x = rx;
+      const p3x = targetX;
       const p3y = targetSvgY;
 
       const path = document.createElementNS(svgNamespace, 'path');
@@ -1915,37 +1987,49 @@ export class MaskLabPanel {
 
     // ── 3. Draw Top Output Arrows & Real Pin Labels ───────────────────────────
     const outputs = analysis.outputs;
-    const topY = -maxY;
     const arrowStemH = svgH * 0.045;
 
     outputs.forEach((pin) => {
-      const cx = pin.x;
-      const stemTopY = topY - arrowStemH;
-      const labelY = stemTopY - fontSize * 0.5;
+      const pinX = pin.x;
+      const pinY = -pin.y;
+      const distances = [
+        { direction: 'left', distance: Math.abs(pin.x - minX), dx: -1, dy: 0 },
+        { direction: 'right', distance: Math.abs(maxX - pin.x), dx: 1, dy: 0 },
+        { direction: 'down', distance: Math.abs(pin.y - minY), dx: 0, dy: 1 },
+        { direction: 'up', distance: Math.abs(maxY - pin.y), dx: 0, dy: -1 }
+      ];
+      const nearestEdge = distances.reduce((nearest, edge) => edge.distance < nearest.distance ? edge : nearest);
+      const arrowLength = Math.max(arrowStemH * 0.55, fontSize * 1.6);
+      const tipX = pinX + nearestEdge.dx * arrowLength;
+      const tipY = pinY + nearestEdge.dy * arrowLength;
+      const baseX = tipX - nearestEdge.dx * strokeW * 4.2;
+      const baseY = tipY - nearestEdge.dy * strokeW * 4.2;
+      const halfWidth = strokeW * 2.8;
+      const perpX = -nearestEdge.dy * halfWidth;
+      const perpY = nearestEdge.dx * halfWidth;
 
       const shaft = document.createElementNS(svgNamespace, 'line');
-      shaft.setAttribute('x1', String(cx));
-      shaft.setAttribute('y1', String(topY));
-      shaft.setAttribute('x2', String(cx));
-      shaft.setAttribute('y2', String(stemTopY));
+      shaft.setAttribute('x1', String(pinX));
+      shaft.setAttribute('y1', String(pinY));
+      shaft.setAttribute('x2', String(tipX));
+      shaft.setAttribute('y2', String(tipY));
       shaft.setAttribute('stroke', '#168bff');
       shaft.setAttribute('stroke-width', String(strokeW * 1.5));
       regions.appendChild(shaft);
 
-      const aw = strokeW * 2.8;
-      const ah = strokeW * 4.2;
       const arrow = document.createElementNS(svgNamespace, 'polygon');
-      arrow.setAttribute('points', `${cx},${stemTopY - ah} ${cx - aw},${stemTopY} ${cx + aw},${stemTopY}`);
+      arrow.setAttribute('points', `${tipX},${tipY} ${baseX + perpX},${baseY + perpY} ${baseX - perpX},${baseY - perpY}`);
       arrow.setAttribute('fill', '#168bff');
       regions.appendChild(arrow);
 
       const text = document.createElementNS(svgNamespace, 'text');
-      text.setAttribute('x', String(cx));
-      text.setAttribute('y', String(labelY - ah));
+      const labelGap = fontSize * 0.55;
+      text.setAttribute('x', String(tipX + nearestEdge.dx * labelGap));
+      text.setAttribute('y', String(tipY + nearestEdge.dy * labelGap));
       text.setAttribute('fill', '#c8ddf0');
       text.setAttribute('font-size', String(fontSize * 0.88));
       text.setAttribute('font-weight', '700');
-      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('text-anchor', nearestEdge.dx < 0 ? 'end' : nearestEdge.dx > 0 ? 'start' : 'middle');
       text.setAttribute('dominant-baseline', 'central');
       text.setAttribute('paint-order', 'stroke');
       text.setAttribute('stroke', '#07111f');

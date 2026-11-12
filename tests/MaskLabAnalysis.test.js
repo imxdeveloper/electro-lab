@@ -181,3 +181,60 @@ test('analysis marks synthesized output names as illustrative', () => {
   assert.equal(analysis.outputsInferred, true);
   assert.ok(analysis.notes.some((note) => /illustrative/.test(note)));
 });
+
+test('counter analysis uses top-level count bus labels and ignores child-cell pin text', () => {
+  const panel = createPanel(64, 64);
+  const preview = {
+    topName: 'counter8',
+    pdk: 'gf180mcu',
+    dbuNm: 1,
+    renderedShapes: 24,
+    bounds: { minX: 0, minY: 0, maxX: 10000, maxY: 10000 },
+    layers: [],
+    texts: [
+      ...Array.from({ length: 8 }, (_, bit) => ({
+        string: `count[${bit}]`,
+        structure: 'counter8',
+        instanceId: null,
+        points: [[1000 + bit * 1000, 0]]
+      })),
+      { string: 'Q', structure: 'dffrnq_1', instanceId: 0, points: [[500, 500]] },
+      { string: 'CLK', structure: 'clkbuf_3', instanceId: 1, points: [[600, 500]] },
+      { string: 'clk', structure: 'counter8', instanceId: null, points: [[5000, 10000]] }
+    ]
+  };
+
+  const analysis = panel.analyzeChipLayout(preview, 'counter8.gds');
+
+  assert.equal(analysis.outputsInferred, false);
+  assert.deepEqual(analysis.outputs.map(({ name }) => name), Array.from({ length: 8 }, (_, bit) => `count[${bit}]`));
+  assert.deepEqual(analysis.detectedClocks, ['clk']);
+  assert.equal(analysis.groups[0].sub, 'count[7:0]');
+});
+
+test('analysis recognizes unsuffixed GF180 filltie cells as placed power candidates', () => {
+  const panel = createPanel(64, 64);
+  const preview = {
+    topName: 'counter8',
+    pdk: 'gf180mcu',
+    dbuNm: 1,
+    renderedShapes: 10,
+    bounds: { minX: 0, minY: 0, maxX: 10000, maxY: 10000 },
+    layers: [],
+    texts: [],
+    instances: [
+      {
+        name: 'gf180mcu_fd_sc_mcu7t5v0__filltie',
+        box: { minX: 800, minY: 500, maxX: 1200, maxY: 900 }
+      }
+    ]
+  };
+
+  const analysis = panel.analyzeChipLayout(preview, 'counter8.gds');
+  const powerGroup = analysis.groups[5];
+
+  assert.equal(powerGroup.instanceCount, 1);
+  assert.equal(powerGroup.placedInstanceCount, 1);
+  assert.equal(powerGroup.boundsSource, 'placed-cell bounds');
+  assert.deepEqual(powerGroup.instanceBoxes.map(({ name }) => name), ['gf180mcu_fd_sc_mcu7t5v0__filltie']);
+});
