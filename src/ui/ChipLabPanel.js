@@ -1,4 +1,15 @@
 import { MASK_TECHNOLOGIES } from '../data/MaskTechnologyProfiles.js';
+import { buildGdsVectorPreview } from '../utils/GdsVectorPreview.js';
+
+export function getCounterOutputLabelBits(texts, topName) {
+  const bits = new Set();
+  for (const text of texts || []) {
+    if (text.structure !== topName || text.instanceId !== null) continue;
+    const match = String(text.string || '').match(/^count\[(\d+)\]$/i);
+    if (match) bits.add(Number(match[1]));
+  }
+  return [...bits].sort((a, b) => a - b);
+}
 
 export function getPhysicalDesignTestGate({ steps = [], testedVerilog = null, currentVerilog = '' }) {
   if (!steps.length) return 'Add at least one test vector in Test Lab before running OpenLane.';
@@ -80,6 +91,7 @@ export class ChipLabPanel {
     this.nodeSequence = 0;
     this.dragState = null;
     this.chipName = 'Untitled Logic Chip';
+    this.pairedCounterGds = null;
     this.physicalLayout = { widthMm: 1, heightMm: 1, placements: {} };
     this.viewMode = 'logic';
     this.selectedNodeIds = new Set();
@@ -140,6 +152,15 @@ export class ChipLabPanel {
         <label>HEIGHT <span><input type="number" min="0.01" max="1000" step="0.01" value="1.00" data-chip-die-height aria-label="Die height in millimeters"> mm</span></label>
         <output data-chip-die-area>1.00 mm²</output>
       </section>
+      <section class="chip-layout-pairing" aria-label="Counter layout comparison">
+        <div><strong>COUNTER LAYOUT COMPARISON</strong><small>Pair a GDS by exact top-level count[n] text labels. This matches labels only, not electrical nets.</small></div>
+        <div class="chip-layout-pair-actions">
+          <button type="button" data-chip-action="pair-counter-gds">Choose counter GDS</button>
+          <button type="button" data-chip-action="open-paired-gds" data-open-paired-gds hidden>Inspect matching labels in Mask Lab</button>
+          <input type="file" accept=".gds,.gdsii" data-chip-gds-file hidden>
+        </div>
+        <span data-chip-gds-pair-status role="status" aria-live="polite">No counter layout paired.</span>
+      </section>
       <div class="chip-workbench">
         <aside class="chip-library">
           <div class="chip-panel-title"><span>COMPONENTS</span><small>Click to place</small></div>
@@ -197,6 +218,7 @@ export class ChipLabPanel {
               <button data-chip-preset="mux-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">MUX</i><span><b>4-bit bus selector</b><small>SELECT chooses A or B</small></span><span class="chip-add-mark">↗</span></button>
               <button data-chip-preset="comparator-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">A≷B</i><span><b>Magnitude comparator</b><small>Greater · equal · less outputs</small></span><span class="chip-add-mark">↗</span></button>
               <button data-chip-preset="alu-demo" data-preset-category="combinational"><i class="chip-gate-icon preset">ALU</i><span><b>Mini 4-bit ALU</b><small>OP chooses addition or XOR</small></span><span class="chip-add-mark">↗</span></button>
+              <button data-chip-preset="counter8" data-preset-category="sequential"><i class="chip-gate-icon clock">CNT</i><span><b>8-bit counter + layout</b><small>Clock, enable, reset · pair a labeled GDS</small></span><span class="chip-add-mark">↗</span></button>
               <button data-chip-preset="counter" data-preset-category="sequential"><i class="chip-gate-icon clock">CNT</i><span><b>Enabled counter</b><small>4-bit count · enable and reset</small></span><span class="chip-add-mark">↗</span></button>
               <button data-chip-preset="traffic-light" data-preset-category="sequential"><i class="chip-gate-icon clock">FSM</i><span><b>Traffic light FSM</b><small>Three states advance on clock</small></span><span class="chip-add-mark">↗</span></button>
               <button data-chip-preset="accumulator" data-preset-category="sequential"><i class="chip-gate-icon preset">Σ+</i><span><b>4-bit accumulator</b><small>Add input on each clock edge</small></span><span class="chip-add-mark">↗</span></button>
@@ -462,6 +484,11 @@ export class ChipLabPanel {
     });
     this.el.querySelector('[data-chip-file]').addEventListener('change', (event) => this.importDesign(event.target.files?.[0]));
     this.el.querySelector('[data-chip-hdl-file]').addEventListener('change', (event) => this.importVerilog(event.target.files?.[0]));
+    this.el.querySelector('[data-chip-gds-file]').addEventListener('change', (event) => {
+      const file = event.target.files?.[0];
+      event.target.value = '';
+      if (file) this.pairCounterGds(file);
+    });
     this.el.querySelector('[data-testbench-csv-file]').addEventListener('change', (event) => this.importTestBenchCsv(event.target.files?.[0]));
     this.el.addEventListener('focusin', (event) => {
       if (event.target.matches('[data-chip-label],[data-chip-name],[data-wire-label],[data-wire-route],[data-chip-note],[data-chip-die-width],[data-chip-die-height]')) {
@@ -633,6 +660,8 @@ export class ChipLabPanel {
     if (action === 'logic-view') this.setViewMode('logic');
     if (action === 'physical-view') this.setViewMode('physical');
     if (action === 'generate-mask') this.openMaskSetup();
+    if (action === 'pair-counter-gds') this.el.querySelector('[data-chip-gds-file]').click();
+    if (action === 'open-paired-gds') this.openPairedCounterGds();
     if (action === 'asic-flow') this.openAsicFlow();
     if (action === 'close-asic-flow') this.el.querySelector('[data-chip-asic-modal]').hidden = true;
     if (action === 'run-asic-flow') this.startAsicFlow();
@@ -1275,6 +1304,52 @@ export class ChipLabPanel {
     }
   }
 
+  async pairCounterGds(file) {
+    const status = this.el.querySelector('[data-chip-gds-pair-status]');
+    status.textContent = `Checking ${file.name} for top-level counter output labels…`;
+    try {
+      const buffer = await file.arrayBuffer();
+      const preview = buildGdsVectorPreview(buffer);
+      const matchedBits = getCounterOutputLabelBits(preview.texts, preview.topName)
+        .filter((bit) => bit >= 0 && bit < 8);
+      if (!matchedBits.length) throw new Error('No top-level count[0]…count[7] text labels were found.');
+      this.pairedCounterGds = { buffer, fileName: file.name, matchedBits };
+      this.el.querySelector('[data-open-paired-gds]').hidden = false;
+      status.textContent = `${file.name} · exact labels found for ${matchedBits.length}/8 counter output bit${matchedBits.length === 1 ? '' : 's'}. Connectivity is not traced.`;
+      this.setStatus(`Counter layout paired by exact count[n] text labels · ${matchedBits.length}/8 bits.`);
+      this.updatePairedCounterSignal();
+    } catch (error) {
+      console.error(`Could not pair counter layout ${file.name}:`, error);
+      this.pairedCounterGds = null;
+      this.el.querySelector('[data-open-paired-gds]').hidden = true;
+      status.textContent = `Could not pair ${file.name}: ${error.message}`;
+    }
+  }
+
+  async openPairedCounterGds() {
+    if (!this.pairedCounterGds) return;
+    const status = this.el.querySelector('[data-chip-gds-pair-status]');
+    try {
+      await this.editor.setWorkspaceMode('masks');
+      if (this.editor.workspaceMode !== 'masks' || !this.editor.maskLabPanel) {
+        throw new Error('Mask Lab did not open.');
+      }
+      this.editor.maskLabPanel.importGdsLayers(this.pairedCounterGds.buffer, this.pairedCounterGds.fileName);
+      this.updatePairedCounterSignal();
+    } catch (error) {
+      console.error(`Could not open paired counter layout ${this.pairedCounterGds.fileName}:`, error);
+      status.textContent = `The layout is paired, but Mask Lab could not open it: ${error.message}`;
+    }
+  }
+
+  updatePairedCounterSignal() {
+    const paired = this.pairedCounterGds;
+    const maskLab = this.editor?.maskLabPanel;
+    if (!paired || maskLab?.gdsBuffer !== paired.buffer) return;
+    const counter = this.nodes.find((node) => node.type === 'COUNTER' && node.width === 8);
+    maskLab.setCounterSignalState(counter ? Number(counter.q) || 0 : null, paired.matchedBits);
+  }
+
   renderMaskProfileSummary() {
     const technology = MASK_TECHNOLOGIES.find(({ id }) => id === this.el.querySelector('[data-chip-mask-profile]').value);
     const summary = this.el.querySelector('[data-chip-mask-profile-summary]');
@@ -1733,6 +1808,17 @@ export class ChipLabPanel {
       this.connect(and1, 0, or, 0); this.connect(and2, 0, or, 1);
       this.connect(xor2, 0, sum, 0); this.connect(or, 0, carry, 0);
       this.chipName = 'Full Adder';
+    } else if (preset === 'counter8') {
+      const enable = add('INPUT', 'ENABLE', 70, 160, { value: true });
+      const reset = add('INPUT', 'RESET', 70, 330);
+      const clock = add('CLOCK', 'CLK', 70, 500);
+      const counter = add('COUNTER', '8-bit counter', 480, 260, { width: 8, q: 0 });
+      const output = add('BUS_OUTPUT', 'count[7:0]', 900, 260, { width: 8 });
+      this.connect(enable, 0, counter, 0);
+      this.connect(reset, 0, counter, 1);
+      this.connect(clock, 0, counter, 2);
+      this.connect(counter, 0, output, 0);
+      this.chipName = '8-bit Counter';
     } else if (preset === 'counter') {
       const enable = add('INPUT', 'ENABLE', 70, 160, { value: true });
       const reset = add('INPUT', 'RESET', 70, 330);
@@ -1818,6 +1904,7 @@ export class ChipLabPanel {
       'mux-demo': 'Toggle SELECT to switch the output between A and B.',
       'comparator-demo': 'Change A and B in the inspector to exercise greater, equal, and less.',
       'alu-demo': 'Toggle OP: LOW selects addition; HIGH selects bitwise XOR.',
+      counter8: 'Step CLK to count; toggle ENABLE to hold, or RESET to clear the count.',
       counter: 'Set ENABLE and RESET, then step the clock to observe the count.',
       'traffic-light': 'Step the clock to move RED → GREEN → YELLOW → RED.',
       accumulator: 'Change ADDEND and step the clock to add it into the stored sum.',
@@ -3683,9 +3770,18 @@ export class ChipLabPanel {
     const inputs = this.nodes.filter((node) => ['INPUT', 'BUS_INPUT', 'BUS_CONST', 'CONST'].includes(node.type));
     const outputs = this.nodes.filter((node) => node.type === 'OUTPUT' || node.type === 'BUS_OUTPUT');
     const result = this.evaluate();
+    const counter8 = this.nodes.find((node) => node.type === 'COUNTER' && node.width === 8);
+    const counterValue = counter8 ? Number(result.outputs.get(counter8.id)) || 0 : 0;
+    const counterBinary = counter8 ? counterValue.toString(2).padStart(8, '0') : '';
     panel.innerHTML = `
       <div class="chip-inspector-heading"><span>LIVE SIMULATION</span><span class="chip-live-badge"><i></i> LIVE</span></div>
       <p class="chip-sim-intro">Set input levels and observe propagated logic states on every connected net.</p>
+      ${counter8 ? `<section class="chip-counter-readout" data-counter-readout aria-live="polite">
+        <div><span>8-BIT COUNTER VALUE</span><strong data-counter-hex>0x${counterValue.toString(16).toUpperCase().padStart(2, '0')}</strong></div>
+        <code data-counter-binary>${counterBinary}</code>
+        <div class="chip-counter-bits" aria-label="Counter bits, most significant first">${counterBinary.split('').map((bit, index) => `<span class="${bit === '1' ? 'high' : ''}" aria-label="count[${7 - index}]=${bit}">${bit}</span>`).join('')}</div>
+        <small>Changes on rising clock edges · synchronous reset · enable can hold the count</small>
+      </section>` : ''}
       <div class="chip-sim-section"><h3>INPUT VECTORS <span>${inputs.length} PINS</span></h3>${inputs.length ? inputs.map((node) => node.type === 'INPUT' || node.type === 'CONST'
         ? `<button class="chip-sim-pin" data-chip-toggle="${node.id}"><span><i class="${node.value ? 'high' : 'low'}"></i>${escapeHTML(node.label)}</span><b>${node.value ? '1 · HIGH' : '0 · LOW'}</b></button>`
         : `<label class="chip-sim-pin"><span>${escapeHTML(node.label)} · ${node.width || 4} bits</span><input data-bus-value data-node-id="${node.id}" type="number" min="0" max="${BUS_MASK(node.width || 4)}" value="${Number(node.value) || 0}"></label>`).join('') : '<p class="chip-sim-empty">Add input pins to drive the design.</p>'}</div>
@@ -3708,6 +3804,7 @@ export class ChipLabPanel {
       ${this.nodes.some((node) => SEQUENTIAL_TYPES.has(node.type)) ? `<section class="chip-clock-debugger"><header><strong>CLOCK EDGE DEBUGGER</strong><span>${this.clockEdgeCount} edges</span></header>${this.renderClockDebugger()}</section>` : ''}
       <section class="chip-waveform-section"><header><strong>TIMING WAVEFORMS</strong><span><button data-chip-action="export-vcd" ${this.trace.length ? '' : 'disabled'}>Export VCD</button><button data-chip-action="clear-waveforms">Clear</button></span></header>${this.renderWaveforms()}</section>
       <p class="chip-sim-note">Combinational propagation is live; D flip-flops update on manual pulses or while the automatic clock is running.</p>`;
+    this.updatePairedCounterSignal();
   }
 
   renderClockDebugger() {

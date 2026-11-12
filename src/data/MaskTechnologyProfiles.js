@@ -82,6 +82,7 @@ export const MASK_TECHNOLOGIES = [
     sourceUrl: null,
     layers: [
       layer('artwork', 'ARTWORK', '#6ca7ed', 'General-purpose drawing layer'),
+      layer('schematic', 'SCHEMATIC', '#6ca7ed', 'Schematic blocks and routes · not a process mask'),
       layer('active', 'ACTIVE (concept)', '#d34c58', 'Conceptual active region'),
       layer('gate', 'GATE (concept)', '#f274ad', 'Conceptual gate region'),
       layer('metal1', 'METAL 1 (concept)', '#d1a44e', 'Conceptual interconnect'),

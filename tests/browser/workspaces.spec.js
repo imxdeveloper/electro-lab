@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { createLegacySampleGds, createSampleGds } from '../helpers/gdsFixture.js';
+import { createCounterGds, createLegacySampleGds, createSampleGds } from '../helpers/gdsFixture.js';
 import { createSampleGlb } from '../helpers/gltfFixture.js';
 
 test.beforeEach(async ({ page }) => {
@@ -359,7 +359,9 @@ test('Circuit Lab toolbox fits the viewport and the LED demo simulates current f
   await expect(dock).toBeVisible();
   await expect(dock.locator('.circuit-dock-title')).toHaveText('Circuit Lab');
   await expect(dock.locator('[data-circuit-scope]')).toContainText('does not simulate GDS layouts');
-  await expect(dock.getByRole('button', { name: 'Add battery' })).toBeVisible();
+  await expect(dock.getByRole('heading', { name: 'Power' })).toBeVisible();
+  await expect(dock.getByRole('button', { name: 'Battery' })).toBeVisible();
+  await expect(dock.getByRole('button', { name: 'Clear circuit' })).toBeVisible();
 
   await page.setViewportSize({ width: 390, height: 844 });
   const bounds = await dock.evaluate((element) => {
@@ -381,4 +383,106 @@ test('Circuit Lab toolbox fits the viewport and the LED demo simulates current f
     return { ledOn: led?.userData.ledOn, activeWires };
   });
   await expect.poll(demoState).toEqual({ ledOn: true, activeWires: 2 });
+
+  const nonCircuitObjectCount = await page.evaluate(() =>
+    window.electroDesignerEditor.sceneManager.objectsList
+      .filter((object) => !object.userData.circuitComponent && !object.userData.circuitConnection).length
+  );
+  await dock.getByRole('button', { name: 'Clear circuit' }).click();
+  await expect.poll(() => page.evaluate(() => window.electroDesignerEditor.sceneManager.objectsList
+    .filter((object) => object.userData.circuitComponent || object.userData.circuitConnection).length
+  )).toBe(0);
+  expect(await page.evaluate(() => window.electroDesignerEditor.sceneManager.objectsList
+    .filter((object) => !object.userData.circuitComponent && !object.userData.circuitConnection).length
+  )).toBe(nonCircuitObjectCount);
+});
+
+test('Generate Mask creates a clearly scoped conceptual preview for the 8-bit counter', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chips');
+  const chipLab = page.locator('.chip-lab');
+  await chipLab.locator('[data-chip-preset="counter8"]').click();
+  await chipLab.locator('[data-chip-action="generate-mask"]').click();
+  await chipLab.locator('[data-chip-mask-profile]').selectOption('generic');
+  await chipLab.locator('[data-chip-action="confirm-mask-setup"]').click();
+
+  const maskLab = page.locator('.mask-lab');
+  await expect(maskLab).toBeVisible();
+  await expect(maskLab.locator('[data-mask-name]')).toHaveValue('8-bit Counter mask');
+  await expect(maskLab.locator('[data-mask-count]')).not.toHaveText('0');
+  await expect(maskLab.locator('[data-mask-power-status]')).toHaveText('Not present');
+  await expect(maskLab.locator('[data-mask-source-details]')).toContainText('5 components · 4 wires');
+  await expect(maskLab.locator('[data-mask-source-details]')).toContainText('0 unresolved');
+  await expect(maskLab.locator('[data-mask-active-layer]')).toContainText('SCHEMATIC');
+  await expect(maskLab.locator('[data-mask-layer="active"]')).toBeVisible();
+  await expect(maskLab.locator('[data-mask-status]')).toContainText('Schematic blocks and routes are shown on SCHEMATIC only');
+  await expect(maskLab.locator('[data-mask-status]')).toContainText('power rails are not represented in this preview');
+  const processLayerPixels = await page.evaluate(() => {
+    const masks = window.electroDesignerEditor.maskLabPanel.layerMasks;
+    return ['active', 'gate', 'metal1'].map((layer) => masks[layer].flat().filter(Boolean).length);
+  });
+  expect(processLayerPixels).toEqual([0, 0, 0]);
+  await maskLab.locator('[data-mask-layer="gate"]').click();
+  await expect(maskLab.locator('[data-mask-count]')).toHaveText('0');
+  await maskLab.locator('[data-mask-layer="schematic"]').click();
+  await expect(maskLab.locator('[data-mask-count]')).not.toHaveText('0');
+
+  const focusItems = await maskLab.locator('.mask-focus-bar').evaluate((bar) =>
+    [...bar.children].map((element) => {
+      const { x, y, width, height } = element.getBoundingClientRect();
+      return { x, y, right: x + width, bottom: y + height };
+    })
+  );
+  for (let first = 0; first < focusItems.length; first += 1) {
+    for (let second = first + 1; second < focusItems.length; second += 1) {
+      const a = focusItems[first];
+      const b = focusItems[second];
+      const overlaps = a.x < b.right && a.right > b.x && a.y < b.bottom && a.bottom > b.y;
+      expect(overlaps, `focus bar items ${first} and ${second} overlap`).toBe(false);
+    }
+  }
+  const maskBounds = await maskLab.evaluate((root) => {
+    const focus = root.querySelector('.mask-focus-bar').getBoundingClientRect();
+    const shell = root.querySelector('.mask-grid-shell').getBoundingClientRect();
+    const grid = root.querySelector('.mask-grid').getBoundingClientRect();
+    return { focusBottom: focus.bottom, shellTop: shell.top, shellBottom: shell.bottom, gridTop: grid.top, gridBottom: grid.bottom };
+  });
+  expect(maskBounds.gridTop).toBeGreaterThanOrEqual(maskBounds.focusBottom);
+  expect(maskBounds.gridBottom).toBeLessThanOrEqual(maskBounds.shellBottom);
+});
+
+test('Chip Lab runs an 8-bit counter and opens its paired GDS with matching output labels highlighted', async ({ page }) => {
+  await page.locator('#workspace-mode-select').selectOption('chips');
+  const chipLab = page.locator('.chip-lab');
+  await expect(chipLab).toBeVisible();
+  await chipLab.locator('[data-chip-preset="counter8"]').click();
+  await expect(chipLab.locator('[data-counter-hex]')).toHaveText('0x00');
+
+  await chipLab.locator('[data-chip-action="step-clock"]').click();
+  await expect(chipLab.locator('[data-counter-hex]')).toHaveText('0x01');
+  await chipLab.locator('.chip-sim-pin[data-chip-toggle]').filter({ hasText: 'ENABLE' }).click();
+  await chipLab.locator('[data-chip-action="step-clock"]').click();
+  await expect(chipLab.locator('[data-counter-hex]')).toHaveText('0x01');
+  await chipLab.locator('.chip-sim-pin[data-chip-toggle]').filter({ hasText: 'RESET' }).click();
+  await chipLab.locator('[data-chip-action="step-clock"]').click();
+  await expect(chipLab.locator('[data-counter-hex]')).toHaveText('0x00');
+  await chipLab.locator('.chip-sim-pin[data-chip-toggle]').filter({ hasText: 'RESET' }).click();
+  await chipLab.locator('.chip-sim-pin[data-chip-toggle]').filter({ hasText: 'ENABLE' }).click();
+  await chipLab.locator('[data-chip-action="step-clock"]').click();
+  await expect(chipLab.locator('[data-counter-hex]')).toHaveText('0x01');
+
+  await chipLab.locator('[data-chip-gds-file]').setInputFiles({
+    name: 'counter8.gds',
+    mimeType: 'application/octet-stream',
+    buffer: Buffer.from(createCounterGds())
+  });
+  await expect(chipLab.locator('[data-chip-gds-pair-status]')).toContainText('8/8');
+  await chipLab.locator('[data-chip-action="open-paired-gds"]').click();
+  const maskLab = page.locator('.mask-lab');
+  const snapshot = maskLab.locator('[data-mask-gds-signal-status]');
+  await expect(snapshot).toBeVisible();
+  await expect(snapshot).toContainText('count[7:0] = 00000001');
+  await expect(snapshot).toContainText('8/8 exact text labels highlighted');
+  await expect(snapshot).toContainText('GDS signal nets are not traced');
+  await expect(maskLab.locator('[data-mask-counter-output-bit].is-counter-matched')).toHaveCount(8);
+  await expect(maskLab.locator('[data-mask-counter-output-bit="0"].is-counter-high')).toHaveCount(1);
 });

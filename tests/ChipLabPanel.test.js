@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ChipLabPanel, getPhysicalDesignTestGate } from '../src/ui/ChipLabPanel.js';
+import { ChipLabPanel, getCounterOutputLabelBits, getPhysicalDesignTestGate } from '../src/ui/ChipLabPanel.js';
+import { createCounterGds } from './helpers/gdsFixture.js';
+import { buildGdsVectorPreview } from '../src/utils/GdsVectorPreview.js';
 
 const createPanel = (nodes, wires) => {
   const panel = Object.create(ChipLabPanel.prototype);
@@ -8,6 +10,11 @@ const createPanel = (nodes, wires) => {
   panel.wires = wires;
   return panel;
 };
+
+test('counter GDS pairing matches only exact top-level count[0..7] text labels', () => {
+  const preview = buildGdsVectorPreview(createCounterGds());
+  assert.deepEqual(getCounterOutputLabelBits(preview.texts, preview.topName), [0, 1, 2, 3, 4, 5, 6, 7]);
+});
 
 test('OpenLane gate requires passing tests for the exact current RTL', () => {
   const currentVerilog = 'module chip(input a, output y); assign y = a; endmodule';

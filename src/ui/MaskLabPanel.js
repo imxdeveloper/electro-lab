@@ -199,6 +199,7 @@ export class MaskLabPanel {
           </div>
         </header>
 
+        <div class="mask-gds-signal-status" data-mask-gds-signal-status hidden role="status" aria-live="polite"></div>
         <div class="mask-gds-analysis-header" data-mask-gds-analysis-header>
           <div class="mask-gds-analysis-title-group">
             <h2 class="mask-gds-analysis-title" data-mask-gds-analysis-title>Functional Grouping Analysis</h2>
@@ -561,8 +562,10 @@ export class MaskLabPanel {
     if (this.activeLayerEl) this.activeLayerEl.textContent = `${this.getTechnology().label} / ${activeLayer?.label || this.activeLayerId}`;
     if (this.maskPathEl) this.maskPathEl.textContent = this.name;
     if (this.maskSourceEl) this.maskSourceEl.textContent = this.sourceDesign ? this.sourceDesign.name : 'Manual';
-    if (this.maskPowerStatusEl) this.maskPowerStatusEl.textContent = this.sourceDesign?.powerCheck?.ok ? 'Connected' :
-      this.sourceDesign?.powerCheck ? 'Review wiring' : 'Not checked';
+    const powerCheck = this.sourceDesign?.powerCheck;
+    const hasPowerRails = powerCheck && (Number(powerCheck.totalVPlus) > 0 || Number(powerCheck.totalGround) > 0);
+    if (this.maskPowerStatusEl) this.maskPowerStatusEl.textContent = powerCheck?.ok ? 'Connected' :
+      hasPowerRails ? 'Review wiring' : powerCheck ? 'Not present' : 'Not checked';
     if (this.maskSourceDetailsEl) {
       if (!this.sourceDesign) {
         this.maskSourceDetailsEl.textContent = 'No Chip Lab source attached.';
@@ -573,7 +576,8 @@ export class MaskLabPanel {
         const layout = this.sourceDesign.physicalLayout;
         const dieSize = layout ? ` · die ${layout.widthMm} × ${layout.heightMm} mm` : '';
         this.maskSourceDetailsEl.textContent = `${this.sourceDesign.componentCount} components · ${this.sourceDesign.wireCount} wires${dieSize} · ${unresolved} unresolved${Number.isInteger(tests) ? ` · tests ${passed}/${tests}` : ''}`;
-        if (this.sourceDesign.sourceView === 'physical-layout-preview') this.maskSourceDetailsEl.textContent += ' · physical placement';
+        if (this.sourceDesign.sourceView === 'schematic-placement-preview') this.maskSourceDetailsEl.textContent += ' · placement preview';
+        if (this.sourceDesign.previewNote) this.maskSourceDetailsEl.textContent += ' · legacy preview migrated';
       }
     }
   }
@@ -887,7 +891,11 @@ export class MaskLabPanel {
     const preview = buildGdsVectorPreview(buffer);
     if (!preview.layers.length || !preview.bounds) throw new Error('This GDS has no drawable geometry to display.');
     this.gdsPreview = preview;
+    this.gdsBuffer = buffer;
     this.gdsFileName = fileName;
+    const signalStatus = this.gdsViewerEl.querySelector('[data-mask-gds-signal-status]');
+    signalStatus.hidden = true;
+    signalStatus.textContent = '';
     this.gdsViewerEl.hidden = false;
     this.el.classList.add('gds-view-mode');
     const units = `${Math.round(preview.width).toLocaleString()} × ${Math.round(preview.height).toLocaleString()} database units`;
@@ -979,6 +987,33 @@ export class MaskLabPanel {
       ? notes.join(' ')
       : 'GDS layer geometry is shown as a read-only vector preview. This does not modify the educational raster or provide foundry signoff.';
     return preview;
+  }
+
+  setCounterSignalState(value, matchedBits = []) {
+    if (!this.gdsSvgEl || !this.gdsViewerEl) return;
+    const matched = new Set(matchedBits);
+    const hasCounterValue = value !== null && value !== undefined && Number.isFinite(Number(value));
+    const normalizedValue = hasCounterValue ? Number(value) & 0xff : 0;
+    const labels = this.gdsSvgEl.querySelectorAll('[data-mask-counter-output-bit]');
+    let matchedCount = 0;
+    labels.forEach((label) => {
+      const bit = Number(label.getAttribute('data-mask-counter-output-bit'));
+      const isMatched = matched.has(bit);
+      const isHigh = hasCounterValue && isMatched && Boolean(normalizedValue & (1 << bit));
+      label.classList.toggle('is-counter-matched', isMatched);
+      label.classList.toggle('is-counter-high', isHigh);
+      label.setAttribute('aria-label', isMatched
+        ? `count[${bit}] label matched by name; ${hasCounterValue ? `simulated value ${isHigh ? 'HIGH' : 'LOW'}` : 'no active simulated counter value'}; net connectivity not traced`
+        : `count[${bit}] layout label; no matching output label was confirmed`);
+      if (isMatched) matchedCount += 1;
+    });
+    const status = this.gdsViewerEl.querySelector('[data-mask-gds-signal-status]');
+    if (!status) return;
+    const binary = normalizedValue.toString(2).padStart(8, '0');
+    status.hidden = false;
+    status.textContent = hasCounterValue
+      ? `Chip Lab counter snapshot · count[7:0] = ${binary} (0x${normalizedValue.toString(16).toUpperCase().padStart(2, '0')}) · ${matchedCount}/8 exact text labels highlighted. Labels are matched by name only; GDS signal nets are not traced.`
+      : `No active 8-bit Chip Lab counter · ${matchedCount}/8 exact text labels matched by name. No simulated values are shown; GDS signal nets are not traced.`;
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -2023,9 +2058,14 @@ export class MaskLabPanel {
       regions.appendChild(arrow);
 
       const text = document.createElementNS(svgNamespace, 'text');
+      const counterBit = pin.name.match(/^count\[(\d+)\]$/i);
       const labelGap = fontSize * 0.55;
       text.setAttribute('x', String(tipX + nearestEdge.dx * labelGap));
       text.setAttribute('y', String(tipY + nearestEdge.dy * labelGap));
+      if (counterBit) {
+        text.setAttribute('class', 'mask-gds-output-label');
+        text.setAttribute('data-mask-counter-output-bit', counterBit[1]);
+      }
       text.setAttribute('fill', '#c8ddf0');
       text.setAttribute('font-size', String(fontSize * 0.88));
       text.setAttribute('font-weight', '700');
@@ -2176,14 +2216,15 @@ export class MaskLabPanel {
     }
     const physicalLayout = chipLab.normalizePhysicalLayout?.(chipLab.physicalLayout) || null;
     const usesPhysicalLayout = Boolean(physicalLayout && nodes.every((node) => physicalLayout.placements?.[node.id]));
-    // Start on ACTIVE so a newly generated layout is visible even when the
-    // design has no routed wires yet (in which case METAL 1 is legitimately empty).
-    this.activeLayerId = 'active';
-    this.setCurrentLayerMask(this.layerMasks.active);
+    this.activeLayerId = 'schematic';
+    const schematicMask = this.createMask(this.gridWidth, this.gridHeight);
+    this.setCurrentLayerMask(schematicMask);
+    if (this.sourceDesign?.sourceView === 'physical-layout-preview') {
+      for (const layerId of ['active', 'gate', 'metal1']) {
+        this.layerMasks[layerId] = this.createMask(this.gridWidth, this.gridHeight);
+      }
+    }
     if (usesPhysicalLayout) {
-      const activeMask = this.createMask(this.gridWidth, this.gridHeight);
-      const gateMask = this.createMask(this.gridWidth, this.gridHeight);
-      const metalMask = this.createMask(this.gridWidth, this.gridHeight);
       const margin = 2;
       const availableWidth = Math.max(1, this.gridWidth - margin * 2 - 1);
       const availableHeight = Math.max(1, this.gridHeight - margin * 2 - 1);
@@ -2202,35 +2243,41 @@ export class MaskLabPanel {
         y: Math.max(0, Math.min(this.gridHeight - 1, Math.round(offsetY + placement.y * renderedHeight)))
       });
       const centers = new Map();
+      const bounds = new Map();
       for (const node of nodes) {
         const center = project(physicalLayout.placements[node.id]);
         centers.set(node.id, center);
         const left = center.x - Math.floor(cellWidth / 2), right = center.x + Math.floor(cellWidth / 2);
         const top = center.y - Math.floor(cellHeight / 2), bottom = center.y + Math.floor(cellHeight / 2);
-        this.traceDesignLine(left, top, right, top, activeMask);
-        this.traceDesignLine(right, top, right, bottom, activeMask);
-        this.traceDesignLine(right, bottom, left, bottom, activeMask);
-        this.traceDesignLine(left, bottom, left, top, activeMask);
-        this.traceDesignLine(center.x, center.y, center.x, center.y, gateMask);
-        if (node.type === 'VPLUS' || node.type === 'GROUND') {
-          this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y, gateMask);
-        }
+        bounds.set(node.id, { halfWidth: Math.floor(cellWidth / 2), halfHeight: Math.floor(cellHeight / 2) });
+        this.traceDesignLine(left, top, right, top, schematicMask);
+        this.traceDesignLine(right, top, right, bottom, schematicMask);
+        this.traceDesignLine(right, bottom, left, bottom, schematicMask);
+        this.traceDesignLine(left, bottom, left, top, schematicMask);
       }
       for (const wire of wires) {
-        const start = centers.get(wire.from), end = centers.get(wire.to);
-        if (!start || !end) continue;
-        if (wire.route === 'straight') this.traceDesignLine(start.x, start.y, end.x, end.y, metalMask);
+        const from = centers.get(wire.from), to = centers.get(wire.to);
+        const fromBounds = bounds.get(wire.from), toBounds = bounds.get(wire.to);
+        if (!from || !to || !fromBounds || !toBounds) continue;
+        const dx = to.x - from.x, dy = to.y - from.y;
+        const sourceScale = Math.min(
+          fromBounds.halfWidth / Math.max(Math.abs(dx), 1),
+          fromBounds.halfHeight / Math.max(Math.abs(dy), 1)
+        );
+        const targetScale = Math.min(
+          toBounds.halfWidth / Math.max(Math.abs(dx), 1),
+          toBounds.halfHeight / Math.max(Math.abs(dy), 1)
+        );
+        const start = { x: Math.round(from.x + dx * sourceScale), y: Math.round(from.y + dy * sourceScale) };
+        const end = { x: Math.round(to.x - dx * targetScale), y: Math.round(to.y - dy * targetScale) };
+        if (wire.route === 'straight') this.traceDesignLine(start.x, start.y, end.x, end.y, schematicMask);
         else {
           const bendX = Math.round((start.x + end.x) / 2);
-          this.traceDesignLine(start.x, start.y, bendX, start.y, metalMask);
-          this.traceDesignLine(bendX, start.y, bendX, end.y, metalMask);
-          this.traceDesignLine(bendX, end.y, end.x, end.y, metalMask);
+          this.traceDesignLine(start.x, start.y, bendX, start.y, schematicMask);
+          this.traceDesignLine(bendX, start.y, bendX, end.y, schematicMask);
+          this.traceDesignLine(bendX, end.y, end.x, end.y, schematicMask);
         }
       }
-      this.layerMasks.active = activeMask;
-      this.layerMasks.gate = gateMask;
-      this.layerMasks.metal1 = metalMask;
-      this.setCurrentLayerMask(activeMask);
     } else {
     const geometry = nodes.map((node) => ({
       node,
@@ -2258,24 +2305,22 @@ export class MaskLabPanel {
       x: Math.max(0, Math.min(this.gridWidth - 1, Math.round(offsetX + (point.x - minX) * scale))),
       y: Math.max(0, Math.min(this.gridHeight - 1, Math.round(offsetY + (point.y - minY) * scale)))
     });
-    this.setCurrentLayerMask(this.createMask(this.gridWidth, this.gridHeight));
-
     for (const { node, left, top, right, bottom } of geometry) {
       const a = project({ x: left, y: top });
       const b = project({ x: right, y: bottom });
-      this.traceDesignLine(a.x, a.y, b.x, a.y);
-      this.traceDesignLine(b.x, a.y, b.x, b.y);
-      this.traceDesignLine(b.x, b.y, a.x, b.y);
-      this.traceDesignLine(a.x, b.y, a.x, a.y);
+      this.traceDesignLine(a.x, a.y, b.x, a.y, schematicMask);
+      this.traceDesignLine(b.x, a.y, b.x, b.y, schematicMask);
+      this.traceDesignLine(b.x, b.y, a.x, b.y, schematicMask);
+      this.traceDesignLine(a.x, b.y, a.x, a.y, schematicMask);
       const center = project({ x: (left + right) / 2, y: (top + bottom) / 2 });
-      this.mask[center.y][center.x] = true;
+      schematicMask[center.y][center.x] = true;
       if (node.type === 'VPLUS') {
-        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y);
-        this.traceDesignLine(center.x, center.y - 1, center.x, center.y + 1);
+        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y, schematicMask);
+        this.traceDesignLine(center.x, center.y - 1, center.x, center.y + 1, schematicMask);
       } else if (node.type === 'GROUND') {
-        this.traceDesignLine(center.x - 1, center.y - 1, center.x + 1, center.y - 1);
-        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y);
-        this.traceDesignLine(center.x - 1, center.y + 1, center.x + 1, center.y + 1);
+        this.traceDesignLine(center.x - 1, center.y - 1, center.x + 1, center.y - 1, schematicMask);
+        this.traceDesignLine(center.x - 1, center.y, center.x + 1, center.y, schematicMask);
+        this.traceDesignLine(center.x - 1, center.y + 1, center.x + 1, center.y + 1, schematicMask);
       }
     }
 
@@ -2308,7 +2353,7 @@ export class MaskLabPanel {
       for (let index = 1; index < points.length; index += 1) {
         const a = project(points[index - 1]);
         const b = project(points[index]);
-        this.traceDesignLine(a.x, a.y, b.x, b.y);
+        this.traceDesignLine(a.x, a.y, b.x, b.y, schematicMask);
       }
     }
     }
@@ -2335,7 +2380,7 @@ export class MaskLabPanel {
       componentCount: nodes.length,
       wireCount: wires.length,
       physicalLayout,
-      sourceView: usesPhysicalLayout ? 'physical-layout-preview' : 'schematic-preview',
+      sourceView: 'schematic-placement-preview',
       generatedAt: new Date().toISOString(),
       powerCheck,
       simulation: {
@@ -2358,10 +2403,13 @@ export class MaskLabPanel {
     this.renderGrid();
     this.updateSummary();
     const stateSaved = this.saveState();
+    const hasPowerRails = powerCheck && (Number(powerCheck.totalVPlus) > 0 || Number(powerCheck.totalGround) > 0);
     const status = powerCheck?.ok
       ? `Auto-filled ${nodes.length} components and ${wires.length} wires. V+ and GND are connected; ${unresolvedComponents.length} unresolved component(s).`
-      : `Auto-filled ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck?.issues.join(' ') || 'power rails are not configured.'}`;
-    this.setStatus(`${status}${usesPhysicalLayout ? ' Conceptual ACTIVE, GATE, and METAL 1 layers generated.' : ''}${stateSaved ? '' : ' Autosave failed; export the mask to keep a copy.'}`);
+      : hasPowerRails
+        ? `Auto-filled ${nodes.length} components and ${wires.length} wires. Review Chip Lab V+ / GND wiring: ${powerCheck.issues.join(' ')}`
+        : `Auto-filled ${nodes.length} components and ${wires.length} wires. This logic design has no V+ / GND terminals; power rails are not represented in this preview.`;
+    this.setStatus(`${status} Schematic blocks and routes are shown on SCHEMATIC only; process layers are not generated from logic blocks.${stateSaved ? '' : ' Autosave failed; export the mask to keep a copy.'}`);
     return true;
   }
 
@@ -2627,6 +2675,7 @@ export class MaskLabPanel {
 
   importMask(data) {
     if (!data || typeof data !== 'object') return false;
+    let migratedLegacyPreview = false;
     if (data.profiles && typeof data.profiles === 'object') {
       const restoredLayouts = this.createProfileLayouts(64, 64);
       for (const technology of MASK_TECHNOLOGIES) {
@@ -2651,6 +2700,25 @@ export class MaskLabPanel {
             target[Math.floor(index / width)][index % width] = true;
           }
         }
+        if (technology.id === 'generic' && layout.sourceDesign?.sourceView === 'physical-layout-preview') {
+          const schematic = layout.layers.schematic;
+          for (const layerId of ['active', 'gate', 'metal1']) {
+            const oldMask = layout.layers[layerId];
+            for (let y = 0; y < height; y += 1) {
+              for (let x = 0; x < width; x += 1) {
+                if (oldMask[y][x]) schematic[y][x] = true;
+                oldMask[y][x] = false;
+              }
+            }
+          }
+          layout.activeLayerId = 'schematic';
+          layout.sourceDesign = {
+            ...layout.sourceDesign,
+            sourceView: 'schematic-placement-preview',
+            previewNote: 'Legacy Chip Lab geometry was moved to SCHEMATIC because transistor-level process masks cannot be derived from logic blocks.'
+          };
+          migratedLegacyPreview = true;
+        }
         restoredLayouts[technology.id] = layout;
       }
       this.profileLayouts = restoredLayouts;
@@ -2660,8 +2728,10 @@ export class MaskLabPanel {
       this.gridWidth = layout.width;
       this.gridHeight = layout.height;
       this.layerMasks = layout.layers;
-      this.activeLayerId = MASK_TECHNOLOGIES.find(({ id }) => id === this.technologyId)
-        .layers.some(({ id }) => id === data.activeLayerId) ? data.activeLayerId : layout.activeLayerId;
+      this.activeLayerId = migratedLegacyPreview && this.technologyId === 'generic'
+        ? layout.activeLayerId
+        : MASK_TECHNOLOGIES.find(({ id }) => id === this.technologyId)
+          .layers.some(({ id }) => id === data.activeLayerId) ? data.activeLayerId : layout.activeLayerId;
       this.mask = this.layerMasks[this.activeLayerId];
       this.name = layout.name;
       this.sourceDesign = layout.sourceDesign;
@@ -2704,6 +2774,7 @@ export class MaskLabPanel {
     this.renderGrid();
     this.updateSummary();
     this.saveState();
+    if (migratedLegacyPreview) this.setStatus(this.sourceDesign.previewNote);
     return true;
   }
 

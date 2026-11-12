@@ -249,3 +249,67 @@ test('auto-fill rasterizes a Chip Lab layout and retains the power check metadat
   assert.equal(panel.sourceDesign.wireCount, 3);
   assert.equal(panel.exportMask().sourceDesign.powerCheck.ok, true);
 });
+
+test('placed Chip Lab previews stay on SCHEMATIC instead of fabricating process-layer geometry', () => {
+  const panel = createPanel(64, 64);
+  panel.editor = {
+    chipLabPanel: {
+      chipName: 'Placed counter',
+      nodes: [
+        { id: 'clock', type: 'CLOCK', label: 'CLK', x: 0, y: 0 },
+        { id: 'counter', type: 'COUNTER', label: 'Counter', x: 200, y: 0 }
+      ],
+      wires: [{ from: 'clock', to: 'counter', route: 'straight' }],
+      physicalLayout: {
+        widthMm: 1,
+        heightMm: 1,
+        placements: { clock: { x: 0.25, y: 0.5 }, counter: { x: 0.75, y: 0.5 } }
+      },
+      normalizePhysicalLayout: (layout) => layout,
+      inspectPowerRails: () => null
+    }
+  };
+
+  assert.equal(panel.autoFillFromChipDesign(), true);
+  assert.equal(panel.activeLayerId, 'schematic');
+  assert.ok(panel.layerMasks.schematic.flat().some(Boolean));
+  assert.equal(panel.layerMasks.active.flat().some(Boolean), false);
+  assert.equal(panel.layerMasks.gate.flat().some(Boolean), false);
+  assert.equal(panel.layerMasks.metal1.flat().some(Boolean), false);
+  assert.equal(panel.sourceDesign.sourceView, 'schematic-placement-preview');
+});
+
+test('legacy Chip Lab pseudo-mask geometry migrates to SCHEMATIC on import', () => {
+  const panel = createPanel(8, 8);
+  const imported = panel.importMask({
+    technologyId: 'generic',
+    activeLayerId: 'active',
+    profiles: {
+      generic: {
+        widthPx: 8,
+        heightPx: 8,
+        activeLayerId: 'active',
+        name: 'Old counter mask',
+        sourceDesign: {
+          name: '8-bit Counter',
+          componentCount: 5,
+          wireCount: 4,
+          sourceView: 'physical-layout-preview'
+        },
+        layers: {
+          active: [1],
+          gate: [10],
+          metal1: [20]
+        }
+      }
+    }
+  });
+
+  assert.equal(imported, true);
+  assert.equal(panel.activeLayerId, 'schematic');
+  assert.deepEqual(panel.layerMasks.schematic.flatMap((row, y) => row.flatMap((active, x) => active ? [y * 8 + x] : [])), [1, 10, 20]);
+  assert.equal(panel.layerMasks.active.flat().some(Boolean), false);
+  assert.equal(panel.layerMasks.gate.flat().some(Boolean), false);
+  assert.equal(panel.layerMasks.metal1.flat().some(Boolean), false);
+  assert.match(panel.sourceDesign.previewNote, /transistor-level process masks cannot be derived/);
+});

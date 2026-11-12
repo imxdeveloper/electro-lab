@@ -149,14 +149,42 @@ export function createSampleGds(options = {}) {
     record(codes.LAYER, INT_2, int2(63)),
     record(codes.XY, INT_4, xy([[5000, 5000]])),
     record(codes.STRING, ASCII, ascii('PIN1\0')),
-    record(codes.ENDEL, NO_DATA),
-    record(0x07, NO_DATA),
-    record(0x04, NO_DATA)
+    record(codes.ENDEL, NO_DATA)
   );
 
+  if (options.counterLabels) {
+    for (let bit = 0; bit < 8; bit += 1) {
+      records.push(
+        record(codes.TEXT, NO_DATA),
+        record(codes.LAYER, INT_2, int2(63)),
+        record(codes.XY, INT_4, xy([[1000 + bit * 1000, 1000]])),
+        record(codes.STRING, ASCII, ascii(`count[${bit}]\0`)),
+        record(codes.ENDEL, NO_DATA)
+      );
+    }
+  }
+
+  records.push(record(0x07, NO_DATA));
+  if (options.childCounterLabel) {
+    records.push(
+      record(0x05, INT_2, timestamp()),
+      record(0x06, ASCII, ascii('CHILD\0')),
+      record(codes.TEXT, NO_DATA),
+      record(codes.LAYER, INT_2, int2(63)),
+      record(codes.XY, INT_4, xy([[3000, 3000]])),
+      record(codes.STRING, ASCII, ascii('count[8]\0')),
+      record(codes.ENDEL, NO_DATA),
+      record(0x07, NO_DATA)
+    );
+  }
+  records.push(record(0x04, NO_DATA));
   return concat(records);
 }
 
 export function createLegacySampleGds() {
   return createSampleGds({ legacy: true });
+}
+
+export function createCounterGds() {
+  return createSampleGds({ counterLabels: true, childCounterLabel: true });
 }

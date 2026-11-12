@@ -217,24 +217,49 @@ export class Editor {
         <section class="circuit-section circuit-only-section">
           <h2><span>Components</span><button class="circuit-section-toggle" type="button" aria-expanded="true" aria-controls="circuit-component-controls" title="Minimize components">-</button></h2>
           <div class="circuit-tools" id="circuit-component-controls" aria-label="Circuit components">
-            <button data-circuit="battery">Add battery</button>
-            <button data-circuit="voltageSource">V Source</button>
-            <button data-circuit="resistor">Add resistor</button>
-            <button data-circuit="led">Add LED</button>
-            <button data-circuit-demo="led">Build LED circuit</button>
-            <button data-circuit="switch">Add switch</button>
-            <button data-circuit="wire">Add wire</button>
-            <button data-circuit="pmosMosfet">P-Channel MOSFET</button>
-            <button data-circuit="nmosMosfet">N-Channel MOSFET</button>
-            <button data-circuit="npnTransistor">NPN Transistor</button>
-            <button data-circuit="capacitor">Capacitor</button>
-            <button data-circuit="diode">Diode</button>
-            <button data-circuit="inductor">Inductor</button>
-            <button data-circuit="ground">Ground</button>
-            <button class="circuit-tool-button" data-circuit-tool="selectObjects">Select objects</button>
-            <button class="circuit-tool-button" data-circuit-tool="placeNode">Place connection point</button>
-            <button class="circuit-tool-button" data-circuit-tool="connectNodes">Connect two points</button>
-            <button class="circuit-delete" data-circuit-delete>Delete selected</button>
+            <div class="circuit-demo-callout">
+              <strong>Try a working example</strong>
+              <small>Build a source-to-LED loop and see the current estimate.</small>
+              <button data-circuit-demo="led">Build LED circuit</button>
+            </div>
+            <div class="circuit-component-group">
+              <h3>Power</h3>
+              <div class="circuit-component-grid">
+                <button data-circuit="battery">Battery</button>
+                <button data-circuit="voltageSource">Voltage source</button>
+                <button data-circuit="ground">Ground</button>
+              </div>
+            </div>
+            <div class="circuit-component-group">
+              <h3>Passives &amp; controls</h3>
+              <div class="circuit-component-grid">
+                <button data-circuit="resistor">Resistor</button>
+                <button data-circuit="capacitor">Capacitor</button>
+                <button data-circuit="inductor">Inductor</button>
+                <button data-circuit="diode">Diode</button>
+                <button data-circuit="led">LED</button>
+                <button data-circuit="switch">Switch</button>
+              </div>
+            </div>
+            <div class="circuit-component-group">
+              <h3>Transistors</h3>
+              <div class="circuit-component-grid">
+                <button data-circuit="pmosMosfet">P-Channel MOSFET</button>
+                <button data-circuit="nmosMosfet">N-Channel MOSFET</button>
+                <button data-circuit="npnTransistor">NPN transistor</button>
+              </div>
+            </div>
+            <div class="circuit-component-group">
+              <h3>Wires &amp; editing</h3>
+              <div class="circuit-edit-tools">
+                <button data-circuit="wire">Add wire</button>
+                <button class="circuit-tool-button" data-circuit-tool="selectObjects">Select objects</button>
+                <button class="circuit-tool-button" data-circuit-tool="placeNode">Place connection point</button>
+                <button class="circuit-tool-button" data-circuit-tool="connectNodes">Connect two points</button>
+                <button class="circuit-delete" data-circuit-delete>Delete selected</button>
+                <button class="circuit-clear" data-circuit-clear>Clear circuit</button>
+              </div>
+            </div>
           </div>
         </section>
         <section class="circuit-section circuit-only-section">
@@ -506,6 +531,16 @@ export class Editor {
     this.circuitDock.querySelector('[data-circuit-delete]').addEventListener('click', () => {
       for (const object of [...this.selectionManager.selectedObjects]) this.sceneManager.removeObject(object);
       this.selectionManager.clearSelection();
+    });
+    this.circuitDock.querySelector('[data-circuit-clear]').addEventListener('click', () => {
+      const circuitObjects = this.sceneManager.objectsList.filter((object) =>
+        object.userData?.circuitComponent || object.userData?.circuitNodeId || object.userData?.circuitConnection
+      );
+      for (const object of circuitObjects) this.sceneManager.removeObject(object);
+      this.selectionManager.clearSelection();
+      this.circuitDock.querySelector('[data-circuit-tool-status]').textContent = circuitObjects.length
+        ? 'Circuit cleared.'
+        : 'There are no circuit components to clear.';
     });
     this.circuitDock.querySelector('[data-circuit-save-model]').addEventListener('click', () => this.exportCircuitModel());
     this.circuitDock.querySelectorAll('[data-circuit-tool]').forEach((button) => {
