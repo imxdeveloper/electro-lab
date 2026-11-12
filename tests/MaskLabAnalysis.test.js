@@ -134,7 +134,14 @@ test('analysis preserves sparse real output labels and does not infer a counter 
     bounds: { minX: 0, minY: 0, maxX: 10000, maxY: 10000 },
     layers: [],
     texts: [{ string: 'Q0', points: [[9000, 10000]] }],
-    instances: [{ name: 'sky130_fd_sc_hd__dfxtp_1' }]
+    instances: [
+      { name: 'sky130_fd_sc_hd__dfxtp_1', box: { minX: 1000, minY: 1200, maxX: 1800, maxY: 1800 } },
+      { name: 'sky130_fd_sc_hd__buf_2', box: { minX: 2000, minY: 2400, maxX: 2600, maxY: 2800 } },
+      { name: 'sky130_fd_sc_hd__xor2_1', box: { minX: 3000, minY: 3400, maxX: 3800, maxY: 3900 } },
+      { name: 'sky130_fd_sc_hd__nand2_1', box: { minX: 4000, minY: 4400, maxX: 4800, maxY: 4900 } },
+      { name: 'sky130_fd_sc_hd__clkbuf_1', box: { minX: 5000, minY: 5400, maxX: 5800, maxY: 5900 } },
+      { name: 'sky130_fd_sc_hd__tapvpwrvgnd_1', box: { minX: 6000, minY: 6400, maxX: 6800, maxY: 6900 } }
+    ]
   };
   const analysis = panel.analyzeChipLayout(preview, 'alu8_datapath.gds');
 
@@ -144,6 +151,16 @@ test('analysis preserves sparse real output labels and does not infer a counter 
   assert.equal(analysis.outputs[0].name, 'Q0');
   assert.equal(analysis.outputsInferred, false);
   assert.equal(analysis.groups[4].sub, '1 detected sequential cells');
+  assert.deepEqual(analysis.groups.map(({ instanceCount }) => instanceCount), [1, 1, 1, 1, 1, 1]);
+  assert.deepEqual(analysis.groups.map(({ boundsSource }) => boundsSource), Array(6).fill('placed-cell bounds'));
+  assert.deepEqual(analysis.groups.map(({ bounds }) => [bounds.minX, bounds.minY, bounds.maxX, bounds.maxY]), [
+    [2000, 2400, 2600, 2800],
+    [3000, 3400, 3800, 3900],
+    [4000, 4400, 4800, 4900],
+    [5000, 5400, 5800, 5900],
+    [1000, 1200, 1800, 1800],
+    [6000, 6400, 6800, 6900]
+  ]);
 });
 
 test('analysis marks synthesized output names as illustrative', () => {

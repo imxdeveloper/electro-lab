@@ -1107,7 +1107,39 @@ export class MaskLabPanel {
       bounds: layer.bounds
     }));
     const instances = Array.isArray(preview.instances) ? preview.instances : [];
-    const sequentialInstanceCount = instances.filter(({ name }) => /(?:^|__)(?:df|dff|sdff|sdf|latch|ff)[a-z0-9]*(?:_|$)/i.test(name)).length;
+    const instanceEvidence = {
+      buffers: { pattern: /(?:^|__)(?:buf|inv)[a-z0-9]*_/i, label: 'buffer / inverter cell-name matches' },
+      xor: { pattern: /(?:^|__)(?:xor|xnor)[a-z0-9]*_/i, label: 'XOR / XNOR cell-name matches' },
+      and: { pattern: /(?:^|__)(?:and|nand|aoi|oai)[a-z0-9]*_/i, label: 'AND / NAND cell-name matches' },
+      clock: { pattern: /(?:^|__)(?:clkbuf|clkinv|clkdlybuf)[a-z0-9]*_/i, label: 'clock-buffer cell-name matches' },
+      sequential: { pattern: /(?:^|__)(?:df|dff|sdff|sdf|dl|latch|ff)[a-z0-9]*_/i, label: 'sequential-cell name matches' },
+      physical: { pattern: /(?:^|__)(?:tap|welltap|decap|fill)[a-z0-9]*_/i, label: 'tap / decap / fill cell-name matches' }
+    };
+    for (const evidence of Object.values(instanceEvidence)) {
+      evidence.count = 0;
+      evidence.placedCount = 0;
+      evidence.bounds = null;
+      for (const instance of instances) {
+        if (!evidence.pattern.test(instance.name || '')) continue;
+        evidence.count += 1;
+        const box = instance.box;
+        if (!box || ![box.minX, box.minY, box.maxX, box.maxY].every(Number.isFinite)) continue;
+        const left = Math.max(minX, box.minX);
+        const bottom = Math.max(minY, box.minY);
+        const right = Math.min(maxX, box.maxX);
+        const top = Math.min(maxY, box.maxY);
+        if (right <= left || top <= bottom) continue;
+        evidence.placedCount += 1;
+        if (!evidence.bounds) evidence.bounds = { minX: left, minY: bottom, maxX: right, maxY: top };
+        else {
+          evidence.bounds.minX = Math.min(evidence.bounds.minX, left);
+          evidence.bounds.minY = Math.min(evidence.bounds.minY, bottom);
+          evidence.bounds.maxX = Math.max(evidence.bounds.maxX, right);
+          evidence.bounds.maxY = Math.max(evidence.bounds.maxY, top);
+        }
+      }
+    }
+    const sequentialInstanceCount = instanceEvidence.sequential.count;
 
     // 5. Coordinate-based visual zones. These do not imply netlist connectivity.
     // The labels mirror the counter-analysis view used by the Mask Lab UI:
@@ -1120,12 +1152,12 @@ export class MaskLabPanel {
         name: 'Output Buffer',
         sub: isCounter ? 'Q7 – Q0' : `${outputs[0]?.name || 'OUT0'} – ${outputs[outputs.length - 1]?.name || 'OUTN'}`,
         color: '#168bff',
+        evidence: instanceEvidence.buffers,
         // Top boundary where output routing and buffer drivers reside
         yMinFrac: 0.882,
         yMaxFrac: 1.0,
         xMinFrac: 0.0,
         xMaxFrac: 0.94,
-        cells: outputs.length,
         definition: 'A visually selected upper die zone associated with output routing in this illustration. Buffer cells and pad connectivity are not verified from layer polygons.',
         bullets: [
           'Output labels are shown when found in GDS text records',
@@ -1139,6 +1171,7 @@ export class MaskLabPanel {
         name: isAlu ? 'Function Select / ALU Logic' : 'Next-State Logic',
         sub: isAlu ? 'Mux / Opcode Matrix' : isCounter ? 'XOR / Inverters' : 'Combinational Logic Cloud',
         color: '#00d878',
+        evidence: instanceEvidence.xor,
         yMinFrac: 0.727,
         yMaxFrac: 0.882,
         xMinFrac: 0.005,
@@ -1160,6 +1193,7 @@ export class MaskLabPanel {
         name: isAlu ? 'Fast Carry Lookahead / Adder' : 'Carry Logic',
         sub: isAlu ? 'CLA Generator' : 'AND / NAND Chains',
         color: '#ffad16',
+        evidence: instanceEvidence.and,
         yMinFrac: 0.582,
         yMaxFrac: 0.727,
         xMinFrac: 0.0,
@@ -1178,6 +1212,7 @@ export class MaskLabPanel {
         name: 'Clock Distribution',
         sub: 'CTS Tree & Buffers',
         color: '#ff3154',
+        evidence: instanceEvidence.clock,
         yMinFrac: 0.484,
         yMaxFrac: 0.582,
         xMinFrac: 0.015,
@@ -1197,6 +1232,7 @@ export class MaskLabPanel {
           ? `${sequentialInstanceCount} detected sequential cells`
           : isCounter ? `${outputs.length} inferred state bits` : 'Sequential cells not identified',
         color: '#ae32ff',
+        evidence: instanceEvidence.sequential,
         yMinFrac: 0.199,
         yMaxFrac: 0.484,
         xMinFrac: 0.0,
@@ -1217,6 +1253,7 @@ export class MaskLabPanel {
         name: 'Power / Ground Rails',
         sub: 'VDD / GND Grid & Taps',
         color: '#00dce7',
+        evidence: instanceEvidence.physical,
         yMinFrac: 0.0,
         yMaxFrac: 0.199,
         xMinFrac: 0.015,
@@ -1233,10 +1270,11 @@ export class MaskLabPanel {
 
     // These are visual zones over the die, not functional regions proven by a netlist.
     const groups = partitionSpecs.map((spec) => {
-      const secMinX = minX + widthDbu * spec.xMinFrac;
-      const secMaxX = minX + widthDbu * spec.xMaxFrac;
-      const secMinY = minY + heightDbu * spec.yMinFrac;
-      const secMaxY = minY + heightDbu * spec.yMaxFrac;
+      const sourceBounds = spec.evidence.bounds;
+      const secMinX = sourceBounds ? sourceBounds.minX : minX + widthDbu * spec.xMinFrac;
+      const secMaxX = sourceBounds ? sourceBounds.maxX : minX + widthDbu * spec.xMaxFrac;
+      const secMinY = sourceBounds ? sourceBounds.minY : minY + heightDbu * spec.yMinFrac;
+      const secMaxY = sourceBounds ? sourceBounds.maxY : minY + heightDbu * spec.yMaxFrac;
       const secWidthDbu = secMaxX - secMinX;
       const secHeightDbu = secMaxY - secMinY;
 
@@ -1271,7 +1309,11 @@ export class MaskLabPanel {
           area: secAreaUm2.toFixed(1)
         },
         percentArea,
-        layers: secLayers
+        layers: secLayers,
+        instanceCount: spec.evidence.count,
+        placedInstanceCount: spec.evidence.placedCount,
+        evidenceLabel: spec.evidence.label,
+        boundsSource: sourceBounds ? 'placed-cell bounds' : 'coordinate guide'
       };
     });
 
@@ -1284,7 +1326,7 @@ export class MaskLabPanel {
       detectedClocks.length ? `Clock labels: ${detectedClocks.join(', ')}.` : 'No clock label was identified in GDS text.',
       detectedPower.length ? `Power labels: ${detectedPower.join(', ')}.` : 'No power label was identified in GDS text.',
       'Colored regions are visual layout zones based on die coordinates; they are not extracted functional blocks.',
-      'Cell functions and signal connectivity cannot be confirmed from this layer preview alone. Verify with the netlist or source design.',
+      'Cell-name matches can identify candidate cell types and placement bounds, but cannot prove their functional role or signal connectivity.',
       gdsOutputCount ? 'Output labels are read from GDS text records.' : 'Output labels and their evenly spaced arrow positions are illustrative, not detected pin locations.'
     ];
 
@@ -1364,7 +1406,9 @@ export class MaskLabPanel {
       <div class="prop-row"><span>Zone bounds</span><strong>[${sec.boundsUm.minX}, ${sec.boundsUm.minY}] → [${sec.boundsUm.maxX}, ${sec.boundsUm.maxY}] µm</strong></div>
       <div class="prop-row"><span>Zone size</span><strong>${sec.boundsUm.width} µm × ${sec.boundsUm.height} µm</strong></div>
       <div class="prop-row"><span>Overlay area</span><strong>${sec.boundsUm.area} µm² (${sec.percentArea}% of die)</strong></div>
-      <div class="prop-row"><span>Intersecting layers</span><strong>${sec.layers.length}</strong></div>
+      <div class="prop-row"><span>Cell-name matches</span><strong>${sec.instanceCount}</strong></div>
+      <div class="prop-row"><span>Located cell bounds</span><strong>${sec.placedInstanceCount}</strong></div>
+      <div class="prop-row"><span>Zone basis</span><strong>${escapeHTML(sec.boundsSource)}</strong></div>
     `;
     inspectorBody.querySelector('[data-inspector-layers]').innerHTML = (sec.layers.length
       ? sec.layers.map((layer) => `<span class="layer-pill" style="border-left-color:${layer.color}">${escapeHTML(layer.name)}</span>`).join('')
@@ -1439,7 +1483,7 @@ export class MaskLabPanel {
             <strong>${g.number}. ${escapeHTML(g.name)}</strong>
             <small>${escapeHTML(g.sub || '')}</small>
           </div>
-          <span class="nav-area">${g.percentArea}% zone</span>
+          <span class="nav-area">${g.instanceCount ? `${g.placedInstanceCount}/${g.instanceCount} cells` : 'guide zone'}</span>
         </button>
       `).join('');
       navigatorList.querySelectorAll('[data-nav-item]').forEach((el) => {
@@ -1497,7 +1541,7 @@ export class MaskLabPanel {
           </div>
           <div class="section-card-meta">
             <span class="meta-tag">Zone area: ${g.boundsUm.area} µm² (${g.percentArea}% of die)</span>
-            <span class="meta-tag">${g.layers.length} intersecting layers</span>
+            <span class="meta-tag">${g.instanceCount ? `${g.placedInstanceCount} placed-cell bounds · ${escapeHTML(g.evidenceLabel)}` : `No cell match · ${escapeHTML(g.boundsSource)}`}</span>
           </div>
           <p class="section-card-definition">${escapeHTML(g.definition)}</p>
           <ul class="section-card-bullets">
@@ -1675,7 +1719,7 @@ export class MaskLabPanel {
       const rx = secMinX;
       const ry = -secMaxY;
 
-      if (spec.isMultiTier) {
+      if (spec.isMultiTier && spec.boundsSource !== 'placed-cell bounds') {
         const tierH = rh / 3;
         const tiers = [
           { yOff: 0, xOff: 0.0, w: 1.0 },
@@ -1696,7 +1740,7 @@ export class MaskLabPanel {
           tierRect.setAttribute('rx', String(strokeW * 2));
           groupEl.appendChild(tierRect);
         });
-      } else if (spec.hasSteppedTab) {
+      } else if (spec.hasSteppedTab && spec.boundsSource !== 'placed-cell bounds') {
         const mainH = rh * 0.78;
         const mainRect = document.createElementNS(svgNamespace, 'rect');
         mainRect.setAttribute('class', 'mask-gds-section-rect');
