@@ -80,8 +80,12 @@ test('analyzeChipLayout extracts real physical dimensions, layer data, and parti
   assert.ok(Number(outBuf.boundsUm.width) > 0);
   assert.ok(Number(outBuf.boundsUm.height) > 0);
   assert.ok(Number(outBuf.boundsUm.area) > 0);
-  assert.ok(Number(outBuf.density) >= 0);
+  assert.equal(outBuf.density, undefined);
+  assert.equal(analysis.outputsInferred, false);
   assert.ok(outBuf.definition.length > 20);
+  assert.ok(analysis.notes.some((note) => /nm\/dbu/.test(note)));
+  assert.ok(analysis.notes.some((note) => /not extracted functional blocks/.test(note)));
+  assert.ok(analysis.groups.every((group) => group.layers.every((layer) => !('shapes' in layer))));
 
   const dff = analysis.groups[4];
   assert.equal(dff.number, 5);
@@ -118,4 +122,45 @@ test('analyzeChipLayout adapts to ALU architecture and non-counter layouts', () 
   // Checks that section 2 & 3 adapt to ALU definitions
   assert.match(analysis.groups[1].name, /ALU Logic|Function Select/);
   assert.match(analysis.groups[2].name, /Adder|Carry/);
+});
+
+test('analysis preserves sparse real output labels and does not infer a counter from bit width alone', () => {
+  const panel = createPanel(64, 64);
+  const preview = {
+    topName: 'alu8_datapath',
+    pdk: 'sky130',
+    dbuNm: 1,
+    renderedShapes: 10,
+    bounds: { minX: 0, minY: 0, maxX: 10000, maxY: 10000 },
+    layers: [],
+    texts: [{ string: 'Q0', points: [[9000, 10000]] }],
+    instances: [{ name: 'sky130_fd_sc_hd__dfxtp_1' }]
+  };
+  const analysis = panel.analyzeChipLayout(preview, 'alu8_datapath.gds');
+
+  assert.equal(analysis.isCounter, false);
+  assert.equal(analysis.architecture, 'Arithmetic Logic Unit (ALU)');
+  assert.equal(analysis.outputs.length, 1);
+  assert.equal(analysis.outputs[0].name, 'Q0');
+  assert.equal(analysis.outputsInferred, false);
+  assert.equal(analysis.groups[4].sub, '1 detected sequential cells');
+});
+
+test('analysis marks synthesized output names as illustrative', () => {
+  const panel = createPanel(64, 64);
+  const preview = {
+    topName: 'counter8',
+    pdk: 'sky130',
+    dbuNm: 1,
+    renderedShapes: 10,
+    bounds: { minX: 0, minY: 0, maxX: 10000, maxY: 10000 },
+    layers: [],
+    texts: []
+  };
+
+  const analysis = panel.analyzeChipLayout(preview, 'counter8.gds');
+
+  assert.equal(analysis.outputs.length, 8);
+  assert.equal(analysis.outputsInferred, true);
+  assert.ok(analysis.notes.some((note) => /illustrative/.test(note)));
 });

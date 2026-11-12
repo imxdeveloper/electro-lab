@@ -5,6 +5,10 @@ import {
 } from '../data/MaskTechnologyProfiles.js';
 import { buildGdsVectorPreview } from '../utils/GdsVectorPreview.js';
 
+const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (char) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+}[char]));
+
 const MASK_STORAGE_KEY = 'electroDesigner.maskLab.current';
 const MASK_LEARNING_PROGRESS_KEY = 'electroDesigner.maskLab.learningProgress';
 const MASK_LEARNING_STATS_KEY = 'electroDesigner.maskLab.learningStats';
@@ -174,14 +178,31 @@ export class MaskLabPanel {
         </aside>
       </div>
       <section class="mask-gds-viewer functional-grouping-active" data-mask-gds-viewer hidden aria-label="GDS layer viewer">
-        <header><div><strong>GDS layer viewer</strong><span data-mask-gds-summary>Import a physical layout to inspect its actual geometry by layer.</span></div>
-          <div class="mask-gds-actions"><button type="button" class="mask-gds-group-toggle" data-mask-gds-grouping aria-pressed="true">Functional grouping</button><button type="button" data-mask-gds-close>Back to mask editor</button><button type="button" data-mask-gds-zoom="out" aria-label="Zoom out">−</button><button type="button" data-mask-gds-zoom="in" aria-label="Zoom in">+</button><button type="button" data-mask-gds-zoom="fit">Fit</button></div>
+        <header>
+          <div class="mask-gds-header-group">
+            <div class="mask-gds-chip-definition">
+              <strong class="mask-gds-viewer-title">Chip Layout &amp; Functional Grouping</strong>
+              <span data-mask-gds-summary>Import a physical layout to inspect its actual geometry by layer.</span>
+            </div>
+            <div class="mask-gds-chip-meta" data-mask-gds-chip-meta>
+              <span class="meta-chip">Chip: —</span>
+              <span class="meta-arch">Arch: —</span>
+              <span class="meta-pdk">PDK: —</span>
+            </div>
+          </div>
+          <div class="mask-gds-actions">
+            <button type="button" class="mask-gds-group-toggle" data-mask-gds-grouping aria-pressed="true">Functional Grouping</button>
+            <button type="button" data-mask-gds-close>Back to Mask Editor</button>
+            <button type="button" data-mask-gds-zoom="out" aria-label="Zoom out">−</button>
+            <button type="button" data-mask-gds-zoom="in" aria-label="Zoom in">+</button>
+            <button type="button" data-mask-gds-zoom="fit">Fit to View</button>
+          </div>
         </header>
 
         <div class="mask-gds-analysis-header" data-mask-gds-analysis-header>
           <div class="mask-gds-analysis-title-group">
-            <h2 class="mask-gds-analysis-title">Chip Layout Analysis &amp; Functional Grouping</h2>
-            <span class="mask-gds-analysis-subtitle">(Transistor-level / Physical Layout)</span>
+            <h2 class="mask-gds-analysis-title" data-mask-gds-analysis-title>Functional Grouping Analysis</h2>
+            <span class="mask-gds-analysis-subtitle" data-mask-gds-analysis-subtitle>Physical layout · Functional sections · Layer map</span>
           </div>
           <div class="mask-chip-telemetry" data-mask-chip-telemetry></div>
         </div>
@@ -195,14 +216,47 @@ export class MaskLabPanel {
             <div data-mask-gds-layers></div>
           </nav>
           <div class="mask-gds-main-stage">
-            <div class="mask-gds-canvas">
+            <!-- Section Navigator: Left panel listing all functional sections -->
+            <aside class="mask-section-navigator" data-mask-section-navigator>
+              <div class="navigator-header">
+                <h4>Functional Sections</h4>
+                <span class="navigator-count" data-mask-section-count>0 sections</span>
+              </div>
+              <div class="navigator-list" data-mask-section-list>
+              </div>
+              <div class="navigator-footer">
+                <small>Click a section to inspect its definition and physical properties.</small>
+              </div>
+            </aside>
+            <div class="mask-gds-canvas-wrapper">
+              <div class="mask-gds-canvas">
               <svg data-mask-gds-svg role="img" aria-label="Vector view of the imported GDS layout" preserveAspectRatio="xMidYMid meet"></svg>
             </div>
+          </div>
+
+            <!-- Section Inspector: Right panel with detailed definition of selected section -->
             <aside class="mask-gds-analysis-sidebar" data-mask-gds-analysis-sidebar>
               <div class="mask-analysis-panel mask-section-inspector-panel" data-mask-section-inspector>
-                <h3>Section Inspector</h3>
-                <div class="mask-inspector-body">
-                  <p class="mask-inspector-hint">Select a functional section to inspect its physical properties.</p>
+                <div class="mask-inspector-empty">
+                  <span class="empty-icon">◐</span>
+                  <h3>Section Inspector</h3>
+                  <p>Select a functional section from the navigator or canvas to view its definition, physical bounds, layer composition, and engineering details.</p>
+                </div>
+                <div class="mask-inspector-body" data-mask-section-inspector-body hidden>
+                  <div class="inspector-section-header">
+                    <span class="inspector-badge" style="background:var(--sec-color);"></span>
+                    <div>
+                      <strong class="inspector-title" data-inspector-title>Section Title</strong>
+                      <small class="inspector-sub" data-inspector-sub>Subtitle</small>
+                    </div>
+                  </div>
+                  <p class="mask-inspector-definition" data-inspector-definition>Definition of this functional section.</p>
+                  <div class="mask-inspector-props" data-inspector-props>
+                  </div>
+                  <div class="inspector-layers" data-inspector-layers>
+                  </div>
+                  <div class="inspector-bullets" data-inspector-bullets>
+                  </div>
                 </div>
               </div>
               <div class="mask-analysis-panel mask-layer-legend-panel">
@@ -229,104 +283,34 @@ export class MaskLabPanel {
         </div>
 
         <div class="mask-gds-analysis-dashboard" data-mask-gds-analysis-dashboard>
-          <div class="mask-dashboard-card mask-functional-blocks-card">
-            <h3>Functional Blocks (8-bit Synchronous Counter)</h3>
-            <div class="mask-blocks-grid">
-              <div class="mask-block-item" style="--block-color: #168bff;">
-                <div class="mask-block-header"><span class="badge">1</span><strong>Output Buffer (Q7 – Q0)</strong></div>
-                <ul>
-                  <li>• Drives external outputs</li>
-                  <li>• Level shifting / buffering</li>
-                </ul>
-              </div>
-              <div class="mask-block-item" style="--block-color: #00d878;">
-                <div class="mask-block-header"><span class="badge">2</span><strong>Next-State Logic (XOR / Inverters)</strong></div>
-                <ul>
-                  <li>• D = Q ⊕ T (except Q0)</li>
-                  <li>• Inverters for Q̄</li>
-                </ul>
-              </div>
-              <div class="mask-block-item" style="--block-color: #ffad16;">
-                <div class="mask-block-header"><span class="badge">3</span><strong>Carry Logic (AND / NAND)</strong></div>
-                <ul>
-                  <li>• T<sub>k</sub> = Q<sub>0</sub> · Q<sub>1</sub> ··· Q<sub>k-1</sub></li>
-                  <li>• Determines when higher bits toggle</li>
-                </ul>
-              </div>
-              <div class="mask-block-item" style="--block-color: #ff3154;">
-                <div class="mask-block-header"><span class="badge">4</span><strong>Clock Distribution</strong></div>
-                <ul>
-                  <li>• Routes clk to all flip-flops</li>
-                  <li>• Buffers / Inverters</li>
-                </ul>
-              </div>
-              <div class="mask-block-item" style="--block-color: #ae32ff;">
-                <div class="mask-block-header"><span class="badge">5</span><strong>D Flip-Flops (8 units)</strong></div>
-                <ul>
-                  <li>• Store Q0 – Q7</li>
-                  <li>• Edge-triggered</li>
-                </ul>
-              </div>
-              <div class="mask-block-item" style="--block-color: #00dce7;">
-                <div class="mask-block-header"><span class="badge">6</span><strong>Power / Ground Rails</strong></div>
-                <ul>
-                  <li>• VDD (top/upper rails)</li>
-                  <li>• GND (bottom rails)</li>
-                </ul>
-              </div>
+          <!-- Functional Section Cards: One expandable card per section -->
+          <div class="mask-dashboard-card mask-functional-section-cards">
+            <div class="card-title-bar">
+              <h3>Functional Section Definitions</h3>
+              <small>Each section with its purpose, physical properties, and layer composition</small>
+            </div>
+            <div class="mask-section-cards-grid" data-mask-section-cards-grid>
+              <!-- Section cards injected by renderAnalysisDashboard -->
             </div>
           </div>
 
           <div class="mask-dashboard-card mask-logic-diagram-card">
-            <h3>Simplified 8-Bit Counter Logic Diagram</h3>
+            <div class="card-title-bar">
+              <h3>Chip Architecture Diagram</h3>
+              <small>Synchronous dataflow overview</small>
+            </div>
             <div class="mask-diagram-wrapper">
-              <svg class="mask-schematic-svg" viewBox="0 0 460 170" preserveAspectRatio="xMidYMid meet">
-                <rect x="130" y="8" width="200" height="20" rx="4" fill="#593200" stroke="#ffad16" stroke-width="1.8" />
-                <text x="230" y="22" fill="#ffffff" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="central">Carry Logic (AND)</text>
-
-                <rect x="60" y="42" width="340" height="20" rx="4" fill="#0d3663" stroke="#168bff" stroke-width="1.8" />
-                <text x="230" y="56" fill="#ffffff" font-size="10" font-weight="700" text-anchor="middle" dominant-baseline="central">Next-State Logic (XOR)</text>
-
-                <line x1="160" y1="28" x2="160" y2="42" stroke="#ffad16" stroke-width="1.4" />
-                <line x1="230" y1="28" x2="230" y2="42" stroke="#ffad16" stroke-width="1.4" />
-                <line x1="300" y1="28" x2="300" y2="42" stroke="#ffad16" stroke-width="1.4" />
-
-                <text x="12" y="94" fill="#8aafc8" font-size="9" font-weight="700" dominant-baseline="central">CLK</text>
-                <line x1="36" y1="94" x2="395" y2="94" stroke="#8aafc8" stroke-width="1.2" />
-
-                <text x="12" y="112" fill="#8aafc8" font-size="9" font-weight="700" dominant-baseline="central">RST</text>
-                <line x1="36" y1="112" x2="395" y2="112" stroke="#8aafc8" stroke-width="1.2" />
-
-                ${['FF7', 'FF6', 'FF5', 'FF4', 'FF3', 'FF2', 'FF1', 'FF0'].map((ff, idx) => {
-                  const x = 64 + idx * 41;
-                  const bit = 7 - idx;
-                  return `
-                    <line x1="${x + 16}" y1="62" x2="${x + 16}" y2="78" stroke="#168bff" stroke-width="1.3" />
-                    <rect x="${x}" y="78" width="32" height="48" rx="3" fill="#0d233e" stroke="#168bff" stroke-width="1.5" />
-                    <text x="${x + 16}" y="88" fill="#8aafc8" font-size="8" font-weight="600" text-anchor="middle">D</text>
-                    <text x="${x + 16}" y="103" fill="#ffffff" font-size="9" font-weight="700" text-anchor="middle">${ff}</text>
-                    <text x="${x + 16}" y="118" fill="#8aafc8" font-size="8" font-weight="600" text-anchor="middle">Q</text>
-                    <line x1="${x + 16}" y1="126" x2="${x + 16}" y2="142" stroke="#168bff" stroke-width="1.3" />
-                    <text x="${x + 16}" y="154" fill="#c8ddf0" font-size="9" font-weight="700" text-anchor="middle">Q${bit}</text>
-                  `;
-                }).join('')}
-
-                <line x1="80" y1="142" x2="398" y2="142" stroke="#168bff" stroke-width="1.5" />
-                <line x1="398" y1="142" x2="415" y2="142" stroke="#168bff" stroke-width="1.8" />
-                <polygon points="420,142 413,138 413,146" fill="#168bff" />
-                <text x="424" y="137" fill="#c8ddf0" font-size="8" font-weight="600">8-bit</text>
-                <text x="424" y="147" fill="#c8ddf0" font-size="8" font-weight="600">Output</text>
-              </svg>
+              <!-- Architecture SVG injected by renderAnalysisDashboard -->
             </div>
           </div>
 
           <div class="mask-dashboard-card mask-notes-card">
-            <h3>Notes</h3>
-            <ul>
-              <li>• This is a visual analysis based on the physical layout you provided.</li>
-              <li>• Exact cell types and connections may vary depending on the design library and tool.</li>
-              <li>• Final verification requires the netlist, GDSII layers, or source code.</li>
-              <li>• The grouping shows the most likely functional regions of the 8-bit counter.</li>
+            <div class="card-title-bar">
+              <h3>Physical Verification &amp; Engineering Notes</h3>
+              <small>PDK layout signoff telemetry</small>
+            </div>
+            <ul data-mask-analysis-notes>
+              <!-- Notes injected by renderAnalysisDashboard -->
             </ul>
           </div>
         </div>
@@ -908,6 +892,15 @@ export class MaskLabPanel {
     this.el.classList.add('gds-view-mode');
     const units = `${Math.round(preview.width).toLocaleString()} × ${Math.round(preview.height).toLocaleString()} database units`;
     this.gdsSummaryEl.textContent = `${fileName} · ${preview.pdk} · ${preview.layers.length} layer(s) · ${preview.renderedShapes.toLocaleString()} shapes · ${units}`;
+    const metaEl = this.gdsViewerEl.querySelector('[data-mask-gds-chip-meta]');
+    if (metaEl) {
+      const clean = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').replace(/\b([a-z])/g, (_, c) => c.toUpperCase()).trim();
+      metaEl.innerHTML = `
+        <span class="meta-chip">Chip: ${escapeHTML(clean)}</span>
+        <span class="meta-arch">Arch: ${preview.pdk.toUpperCase()}</span>
+        <span class="meta-pdk">PDK: ${preview.layers.length} layers</span>
+      `;
+    }
     this.gdsLayersEl.replaceChildren();
     this.gdsSvgEl.replaceChildren();
 
@@ -964,12 +957,7 @@ export class MaskLabPanel {
       geometryGroup.appendChild(layerGroup);
     }
 
-    // ── Dynamic Functional Grouping Analysis ─────────────────────────────
-    // Analyze the imported geometry, layer hierarchy, standard cells and pins
-    // to dynamically detect functional blocks, outputs, and process layers.
-    // ── Dynamic Functional Grouping Analysis ─────────────────────────────
-    // Analyze the imported geometry, layer hierarchy, standard cells and pins
-    // to dynamically detect functional blocks, outputs, and process layers.
+    // Analyze measured layout metadata and create approximate, coordinate-based zones.
     const analysis = this.analyzeChipLayout(preview, fileName);
     this.currentGdsAnalysis = analysis;
     this.renderAnalysisDashboard(analysis);
@@ -995,13 +983,8 @@ export class MaskLabPanel {
 
   // ─────────────────────────────────────────────────────────────────────────
   // analyzeChipLayout
-  // Rigorously analyzes any imported physical layout from real data & layers:
-  // - Computes true physical scale (dbu to µm), die dimensions, aspect ratio, area
-  // - Extracts real I/O pins, clocks, and power rails from GDS text records
-  // - Classifies chip architecture (Counter, ALU, Processor Core, Memory, ASIC)
-  // - Dynamically partitions layout into 6 functional sections with exact bounds,
-  //   real area (µm²), shape counts, gate densities, and layer compositions
-  // - Generates precise electrical definitions and design verification notes
+  // Measures die and layer metadata, detects labelled pins, and creates six
+  // approximate coordinate-based zones for visual inspection.
   // ─────────────────────────────────────────────────────────────────────────
   analyzeChipLayout(preview, fileName = 'layout.gds') {
     const rawName = preview.topName || preview.libraryName || this.sourceDesign?.name || fileName.replace(/\.[^/.]+$/, '');
@@ -1023,7 +1006,7 @@ export class MaskLabPanel {
     const aspectRatio = (widthUm / Math.max(heightUm, 0.001)).toFixed(2);
 
     // 2. Process Node & Architecture Classification
-    const isCounter = /counter|cnt|8-?bit|timer|prescaler/i.test(cleanName) || /counter/i.test(fileName);
+    const isCounter = /counter|cnt|timer|prescaler/i.test(cleanName) || /counter/i.test(fileName);
     const isAlu = /alu|adder|arithmetic|mac|multiplier|subtractor|comp/i.test(cleanName);
     const isCore = /core|cpu|mcu|rv32|riscv|processor|pic/i.test(cleanName);
     const isMemory = /ram|rom|sram|fifo|register\s*file|mem|cache/i.test(cleanName);
@@ -1043,7 +1026,7 @@ export class MaskLabPanel {
     else if (preview.pdk && preview.pdk !== 'unknown') pdkLabel = `${preview.pdk.toUpperCase()} CMOS`;
 
     const title = `${cleanName || 'Integrated Circuit'} – Layout Analysis & Functional Grouping`;
-    const subtitle = `Transistor-level / Physical Layout · ${pdkLabel}`;
+    const subtitle = `Physical layout · Approximate visual zones · ${pdkLabel}`;
 
     // 3. I/O Pin & Port Detection from GDS Text Records
     const detectedInputs = [];
@@ -1067,11 +1050,13 @@ export class MaskLabPanel {
         if (/^(?:clk|clock|gclk|sys_clk)/i.test(str) && !detectedClocks.includes(str)) detectedClocks.push(str);
         else if (/^(?:rst|reset|clr|clear|nrst)/i.test(str) && !detectedResets.includes(str)) detectedResets.push(str);
         else if (/^(?:vdd|vss|gnd|vcc|vdda|vssa)/i.test(str) && !detectedPower.includes(str)) detectedPower.push(str);
-        else if (/^(?:q|out|dout|result|y|sum|cout)[\s_\[]*\d*/i.test(str) && !detectedOutputs.some((p) => p.name === str)) detectedOutputs.push(pinObj);
-        else if (/^(?:d|in|din|a|b|cin|sel|en|enable|load)[\s_\[]*\d*/i.test(str) && !detectedInputs.some((p) => p.name === str)) detectedInputs.push(pinObj);
+        else if (/^(?:q|out|dout|result|y|sum|cout)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) && !detectedOutputs.some((p) => p.name === str)) detectedOutputs.push(pinObj);
+        else if (/^(?:d|in|din|a|b|cin|sel|en|enable|load)(?:[\s_]*\d+|\[\d+\])?$/i.test(str) && !detectedInputs.some((p) => p.name === str)) detectedInputs.push(pinObj);
       }
     }
 
+    const gdsOutputCount = detectedOutputs.length;
+    detectedOutputs.sort((a, b) => a.x - b.x);
     if (!detectedOutputs.length && this.sourceDesign?.simulation?.outputs?.length) {
       for (let i = 0; i < this.sourceDesign.simulation.outputs.length; i++) {
         const out = this.sourceDesign.simulation.outputs[i];
@@ -1085,7 +1070,7 @@ export class MaskLabPanel {
     }
 
     // Fallback pin synthesis matching architecture if no texts found in GDS
-    const rawOutputLabels = detectedOutputs.length >= 2
+    const rawOutputLabels = detectedOutputs.length
       ? detectedOutputs.map((p) => p.name)
       : isCounter
         ? ['Q7', 'Q6', 'Q5', 'Q4', 'Q3', 'Q2', 'Q1', 'Q0']
@@ -1121,9 +1106,11 @@ export class MaskLabPanel {
       shapes: layer.shapes,
       bounds: layer.bounds
     }));
+    const instances = Array.isArray(preview.instances) ? preview.instances : [];
+    const sequentialInstanceCount = instances.filter(({ name }) => /(?:^|__)(?:df|dff|sdff|sdf|latch|ff)[a-z0-9]*(?:_|$)/i.test(name)).length;
 
-    // 5. Dynamic Functional Section Partitioning
-    // We partition the chip geometry into 6 canonical functional regions:
+    // 5. Coordinate-based visual zones. These do not imply netlist connectivity.
+    // The labels mirror the counter-analysis view used by the Mask Lab UI:
     // 1: Output Buffer, 2: Next-State Logic, 3: Carry Logic,
     // 4: Clock Distribution, 5: Sequential Storage, 6: Power/Ground Rails.
     const partitionSpecs = [
@@ -1139,13 +1126,11 @@ export class MaskLabPanel {
         xMinFrac: 0.0,
         xMaxFrac: 0.94,
         cells: outputs.length,
-        definition: isCounter
-          ? 'Output stage line drivers and level-shifter buffers. Amplifies weak internal flip-flop state signals (Q0–Q7) to drive external capacitive board interconnects (CL ≥ 15 pF) with high current capability (IOH/IOL ≥ 8 mA) and ESD protection.'
-          : 'High-current output drivers and pad-interface buffers. Provides impedance matching and level shifting between internal core logic and external capacitive chip pins.',
+        definition: 'A visually selected upper die zone associated with output routing in this illustration. Buffer cells and pad connectivity are not verified from layer polygons.',
         bullets: [
-          'Drives external loads & package pins',
-          `Level shifting & buffering for ${outputs.length} output bits`,
-          'ESD isolation & high-current slew control'
+          'Output labels are shown when found in GDS text records',
+          'Arrow positions may be illustrative when pins are not labelled',
+          'Electrical drive strength and ESD behavior are not analyzed'
         ]
       },
       {
@@ -1159,14 +1144,14 @@ export class MaskLabPanel {
         xMinFrac: 0.005,
         xMaxFrac: 0.92,
         definition: isCounter
-          ? 'Next-state boolean evaluation network implementing Dk = Qk ⊕ Tk. Computes synchronous toggle conditions using complementary CMOS transmission-gate XOR cells and balanced inverter pairs for complementary state outputs (Q̄).'
+          ? 'Candidate combinational region. XOR and toggle logic is a typical counter implementation, but connectivity is not extracted from this visual grouping.'
           : isAlu
-            ? 'Arithmetic and logical function select multiplexing matrix. Steers operands A and B through inverter arrays and complementary CMOS pass-transistor logic.'
-            : 'Primary combinational next-state evaluation cloud. Evaluates input vectors and current state to determine target register values for the upcoming clock cycle.',
+            ? 'Candidate arithmetic or function-select region based on the design name; operations and cell connectivity are not verified.'
+            : 'Candidate combinational-logic region based on die position; exact Boolean function requires a netlist or source design.',
         bullets: [
-          isCounter ? 'Evaluates toggle equations: Dk = Qk ⊕ Tk' : 'Combinational Boolean steering network',
-          'Inverter chains for complementary outputs',
-          'Balanced propagation delays to eliminate race hazards'
+          'Visual region only; no nets are traced',
+          'Logic function requires netlist or source verification',
+          'Delay and race behavior are not analyzed'
         ]
       },
       {
@@ -1180,13 +1165,11 @@ export class MaskLabPanel {
         xMinFrac: 0.0,
         xMaxFrac: 0.92,
         hasPartitions: true,
-        definition: isCounter
-          ? 'High-speed lookahead carry generation network evaluating Tk = Q0 · Q1 ··· Qk-1. Parallel AND/NAND gate chains determine which bits toggle synchronously without waiting for ripple propagation across lower bits.'
-          : 'High-speed Carry Lookahead (CLA) generate/propagate matrix (Gi = Ai · Bi, Pi = Ai ⊕ Bi). Eliminates ripple-carry delay and accelerates multi-bit arithmetic operations.',
+        definition: 'Candidate carry/AND-NAND region shown for a counter-style layout. Gate type and signal function cannot be confirmed from this overlay.',
         bullets: [
-          isCounter ? 'Tk = Q0 · Q1 ··· Qk-1 lookahead condition' : 'High-speed parallel prefix carry acceleration',
-          'Determines synchronous higher-bit toggle events',
-          'Multi-input static CMOS gates minimizing propagation delay'
+          'Placement is a visual heuristic',
+          'No carry chain is traced',
+          'Timing and gate topology are not analyzed'
         ]
       },
       {
@@ -1199,31 +1182,33 @@ export class MaskLabPanel {
         yMaxFrac: 0.582,
         xMinFrac: 0.015,
         xMaxFrac: 0.92,
-        definition: 'Clock Tree Synthesis (CTS) distribution spine. Low-skew balanced H-tree routing corridor and clock inverter buffers delivering the global clock (CLK) to all flip-flops simultaneously, keeping clock skew below 50 ps.',
+        definition: 'Candidate clock-routing corridor selected by position. Clock labels may be detected, but this preview does not trace a clock tree or calculate skew.',
         bullets: [
-          'Routes master clock (CLK) across the core',
-          'Low-skew symmetrical CTS inverter/buffer tree',
-          'Maintains fast, uniform transition edges (tr, tf < 100 ps)'
+          'Clock text labels are listed when present',
+          'Clock connectivity is not traced',
+          'Skew and transition times are not calculated'
         ]
       },
       {
         id: 'sec-5-sequential-storage',
         number: 5,
         name: isMemory ? 'SRAM Storage Bitcells' : 'D Flip-Flops',
-        sub: `${outputs.length} Master-Slave Units`,
+        sub: sequentialInstanceCount
+          ? `${sequentialInstanceCount} detected sequential cells`
+          : isCounter ? `${outputs.length} inferred state bits` : 'Sequential cells not identified',
         color: '#ae32ff',
         yMinFrac: 0.199,
         yMaxFrac: 0.484,
         xMinFrac: 0.0,
         xMaxFrac: 1.0,
         isMultiTier: true,
-        definition: isCounter
-          ? `${outputs.length} edge-triggered master-slave D flip-flop registers holding binary state vector ${outputs[outputs.length - 1]?.name || 'Q7'}–${outputs[0]?.name || 'Q0'}. Updates synchronously on the rising clock edge with active-low asynchronous reset capability.`
-          : `${outputs.length} master-slave sequential register units. Latches multi-bit words synchronously on clock transitions with glitch-free hold times.`,
+        definition: sequentialInstanceCount
+          ? `${sequentialInstanceCount} placed cell instance names match common sequential-cell patterns. Their exact function and connectivity still require library and netlist verification.`
+          : 'Candidate storage region selected by position. Sequential cells are not identified unless their instance names are available in the imported layout.',
         bullets: [
-          `Stores synchronous state (${outputs[outputs.length - 1]?.name || 'Q7'}–${outputs[0]?.name || 'Q0'})`,
-          'Edge-triggered master-slave latching',
-          'Dedicated asynchronous clear / preset rails'
+          sequentialInstanceCount ? `${sequentialInstanceCount} likely sequential instances by name` : 'No sequential cell instances identified',
+          'State width is not inferred from region size',
+          'Reset behavior requires netlist or source verification'
         ]
       },
       {
@@ -1237,16 +1222,16 @@ export class MaskLabPanel {
         xMinFrac: 0.015,
         xMaxFrac: 0.985,
         hasSteppedTab: true,
-        definition: 'Power Distribution Network (PDN). Low-impedance VDD and VSS power rails and well-tap cells. Metal 1 horizontal standard-cell supply rails and vertical straps delivering uniform supply voltage (IR drop < 25 mV) and substrate biasing.',
+        definition: 'Candidate lower die zone often used for power routing. Rail continuity, well taps, and supply integrity are not determined by the visual overlay.',
         bullets: [
-          'Upper VDD rails & lower GND distribution',
-          'Substrate and N-well tap cells to prevent CMOS latch-up',
-          'Decoupling capacitors suppressing high-frequency supply ripple'
+          'Power labels are listed when present',
+          'No power-net connectivity is traced',
+          'IR drop, latch-up, and decoupling are not analyzed'
         ]
       }
     ];
 
-    // Compute exact physical coordinates, area, layer composition, and density for each section
+    // These are visual zones over the die, not functional regions proven by a netlist.
     const groups = partitionSpecs.map((spec) => {
       const secMinX = minX + widthDbu * spec.xMinFrac;
       const secMaxX = minX + widthDbu * spec.xMaxFrac;
@@ -1259,9 +1244,6 @@ export class MaskLabPanel {
       const secHeightUm = secHeightDbu * scaleUm;
       const secAreaUm2 = secWidthUm * secHeightUm;
       const percentArea = ((secAreaUm2 / Math.max(dieAreaUm2, 0.001)) * 100).toFixed(1);
-
-      // Count shapes of active layers falling within this section's bounding box
-      let secShapeCount = 0;
       const secLayers = [];
       for (const l of activeLayers) {
         if (!l.bounds) continue;
@@ -1272,14 +1254,9 @@ export class MaskLabPanel {
           l.bounds.minY > secMaxY
         );
         if (overlaps) {
-          // Proportionate shape estimate based on section area overlap
-          const estShapes = Math.max(1, Math.round(l.shapes * (secAreaUm2 / dieAreaUm2)));
-          secShapeCount += estShapes;
-          secLayers.push({ name: l.name, role: l.role, color: l.color, shapes: estShapes });
+          secLayers.push({ name: l.name, role: l.role, color: l.color });
         }
       }
-
-      const density = secAreaUm2 > 0 ? (secShapeCount / secAreaUm2).toFixed(2) : '0.00';
 
       return {
         ...spec,
@@ -1294,8 +1271,6 @@ export class MaskLabPanel {
           area: secAreaUm2.toFixed(1)
         },
         percentArea,
-        density,
-        shapeCount: secShapeCount,
         layers: secLayers
       };
     });
@@ -1306,9 +1281,11 @@ export class MaskLabPanel {
       `Technology: ${pdkLabel} · Grid: ${dbuNm.toFixed(1)} nm/dbu (${scaleUm.toFixed(3)} µm/unit).`,
       `Die Dimensions: ${widthUm.toFixed(1)} µm × ${heightUm.toFixed(1)} µm (Aspect Ratio ${aspectRatio}, Area ${dieAreaUm2.toFixed(1)} µm² / ${dieAreaMm2.toFixed(4)} mm²).`,
       `Layer Count: ${activeLayers.length} active layers · Rendered Shapes: ${preview.renderedShapes.toLocaleString()} (${(preview.renderedShapes / dieAreaUm2).toFixed(2)} shapes/µm²).`,
-      detectedClocks.length ? `Clock Port: ${detectedClocks.join(', ')} (Synchronous clocking).` : 'Clock Network: Global internal CTS spine.',
-      detectedPower.length ? `Power Rails: ${detectedPower.join(', ')}.` : 'Power Grid: Dual-rail VDD/GND inter-row standard cell distribution.',
-      'Functional sections are partitioned dynamically from physical standard-cell boundaries and layer geometry.'
+      detectedClocks.length ? `Clock labels: ${detectedClocks.join(', ')}.` : 'No clock label was identified in GDS text.',
+      detectedPower.length ? `Power labels: ${detectedPower.join(', ')}.` : 'No power label was identified in GDS text.',
+      'Colored regions are visual layout zones based on die coordinates; they are not extracted functional blocks.',
+      'Cell functions and signal connectivity cannot be confirmed from this layer preview alone. Verify with the netlist or source design.',
+      gdsOutputCount ? 'Output labels are read from GDS text records.' : 'Output labels and their evenly spaced arrow positions are illustrative, not detected pin locations.'
     ];
 
     return {
@@ -1330,6 +1307,7 @@ export class MaskLabPanel {
       aspectRatio,
       totalShapes: preview.renderedShapes,
       outputs,
+      outputsInferred: gdsOutputCount === 0,
       detectedInputs,
       detectedClocks,
       detectedResets,
@@ -1349,53 +1327,50 @@ export class MaskLabPanel {
   selectSection(index) {
     if (!this.currentGdsAnalysis || !this.currentGdsAnalysis.groups) return;
     const groups = this.currentGdsAnalysis.groups;
-    const sec = groups[index] || groups[0];
+    const selectedIndex = Number.isInteger(index) && index >= 0 && index < groups.length ? index : 0;
+    const sec = groups[selectedIndex];
     if (!sec) return;
-    this.selectedSectionIndex = index;
+    this.selectedSectionIndex = selectedIndex;
 
-    // 1. Update SVG Highlight Classes
     if (this.gdsSvgEl) {
       this.gdsSvgEl.querySelectorAll('.mask-gds-section-group').forEach((el) => {
         const idx = Number(el.dataset.sectionIndex);
-        el.classList.toggle('is-active', idx === index);
+        const active = idx === selectedIndex;
+        el.classList.toggle('is-active', active);
+        el.setAttribute('aria-pressed', String(active));
       });
     }
 
-    // 2. Update Dashboard Cards Highlight
     if (this.gdsViewerEl) {
-      this.gdsViewerEl.querySelectorAll('[data-section-card]').forEach((card) => {
-        const idx = Number(card.dataset.sectionCard);
-        card.classList.toggle('is-active', idx === index);
+      this.gdsViewerEl.querySelectorAll('[data-section-card], [data-nav-item]').forEach((item) => {
+        const attr = item.hasAttribute('data-section-card') ? 'sectionCard' : 'navItem';
+        const active = Number(item.dataset[attr]) === selectedIndex;
+        item.classList.toggle('is-active', active);
+        item.setAttribute('aria-pressed', String(active));
       });
     }
 
-    // 3. Populate Section Inspector in Sidebar
     const inspectorEl = this.gdsViewerEl?.querySelector('[data-mask-section-inspector]');
-    if (inspectorEl) {
-      const layerBadges = (sec.layers || []).slice(0, 5).map((l) => `
-        <span class="mask-layer-pill" style="border-left: 3px solid ${l.color};">
-          ${l.name} <small>(${l.shapes})</small>
-        </span>
-      `).join('');
-
-      inspectorEl.innerHTML = `
-        <div class="mask-inspector-header">
-          <span class="badge" style="background:${sec.color};">${sec.number}</span>
-          <div>
-            <strong>${sec.name}</strong>
-            <small style="color:${sec.color};">${sec.sub || ''}</small>
-          </div>
-        </div>
-        <p class="mask-inspector-definition">${sec.definition}</p>
-        <div class="mask-inspector-props">
-          <div class="prop-row"><span>Bounding Box</span><strong>[${sec.boundsUm.minX}, ${sec.boundsUm.minY}] → [${sec.boundsUm.maxX}, ${sec.boundsUm.maxY}] µm</strong></div>
-          <div class="prop-row"><span>Dimensions</span><strong>${sec.boundsUm.width} µm × ${sec.boundsUm.height} µm</strong></div>
-          <div class="prop-row"><span>Physical Area</span><strong>${sec.boundsUm.area} µm² <small style="color:#7caef3;">(${sec.percentArea}% of core)</small></strong></div>
-          <div class="prop-row"><span>Shape Density</span><strong>${sec.density} shapes/µm²</strong></div>
-          <div class="prop-row"><span>Active Layers</span><div class="mask-pills-row">${layerBadges || 'Standard CMOS stack'}</div></div>
-        </div>
-      `;
-    }
+    const inspectorBody = inspectorEl?.querySelector('[data-mask-section-inspector-body]');
+    if (!inspectorBody) return;
+    inspectorEl.querySelector('.mask-inspector-empty').hidden = true;
+    inspectorBody.hidden = false;
+    inspectorBody.style.setProperty('--sec-color', sec.color);
+    inspectorBody.querySelector('.inspector-badge').textContent = String(sec.number);
+    inspectorBody.querySelector('[data-inspector-title]').textContent = sec.name;
+    inspectorBody.querySelector('[data-inspector-sub]').textContent = sec.sub || '';
+    inspectorBody.querySelector('[data-inspector-definition]').textContent = sec.definition;
+    inspectorBody.querySelector('[data-inspector-props]').innerHTML = `
+      <div class="prop-row"><span>Zone bounds</span><strong>[${sec.boundsUm.minX}, ${sec.boundsUm.minY}] → [${sec.boundsUm.maxX}, ${sec.boundsUm.maxY}] µm</strong></div>
+      <div class="prop-row"><span>Zone size</span><strong>${sec.boundsUm.width} µm × ${sec.boundsUm.height} µm</strong></div>
+      <div class="prop-row"><span>Overlay area</span><strong>${sec.boundsUm.area} µm² (${sec.percentArea}% of die)</strong></div>
+      <div class="prop-row"><span>Intersecting layers</span><strong>${sec.layers.length}</strong></div>
+    `;
+    inspectorBody.querySelector('[data-inspector-layers]').innerHTML = (sec.layers.length
+      ? sec.layers.map((layer) => `<span class="layer-pill" style="border-left-color:${layer.color}">${escapeHTML(layer.name)}</span>`).join('')
+      : '<span>No layer bounds available</span>');
+    inspectorBody.querySelector('[data-inspector-bullets]').innerHTML = sec.bullets
+      .map((bullet) => `<li>${escapeHTML(bullet)}</li>`).join('');
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1406,22 +1381,32 @@ export class MaskLabPanel {
   renderAnalysisDashboard(analysis) {
     if (!analysis || !this.gdsViewerEl) return;
 
-    // 1. Update Title Header & Live Telemetry Strip
+    // 1. Update Chip Meta Header
+    const metaEl = this.gdsViewerEl.querySelector('[data-mask-gds-chip-meta]');
+    if (metaEl) {
+      metaEl.innerHTML = `
+        <span class="meta-chip">Chip: ${escapeHTML(analysis.cleanName)}</span>
+        <span class="meta-arch">Arch: ${escapeHTML(analysis.architecture)}</span>
+        <span class="meta-pdk">PDK: ${escapeHTML(analysis.pdkLabel)}</span>
+      `;
+    }
+
+    // 2. Update Title Header & Live Telemetry Strip
     const headerEl = this.gdsViewerEl.querySelector('[data-mask-gds-analysis-header]');
     if (headerEl) {
       headerEl.innerHTML = `
         <div class="mask-gds-analysis-title-group">
-          <h2 class="mask-gds-analysis-title">${analysis.title}</h2>
-          <span class="mask-gds-analysis-subtitle">${analysis.subtitle}</span>
+          <h2 class="mask-gds-analysis-title" data-mask-gds-analysis-title>${escapeHTML(analysis.title)}</h2>
+          <span class="mask-gds-analysis-subtitle" data-mask-gds-analysis-subtitle>${escapeHTML(analysis.subtitle)}</span>
         </div>
-        <div class="mask-chip-telemetry">
+        <div class="mask-chip-telemetry" data-mask-chip-telemetry>
           <div class="telemetry-pill">
             <span class="pill-label">ARCHITECTURE</span>
-            <strong>${analysis.architecture}</strong>
+            <strong>${escapeHTML(analysis.architecture)}</strong>
           </div>
           <div class="telemetry-pill">
             <span class="pill-label">PROCESS NODE</span>
-            <strong>${analysis.pdkLabel}</strong>
+            <strong>${escapeHTML(analysis.pdkLabel)}</strong>
           </div>
           <div class="telemetry-pill">
             <span class="pill-label">DIE SIZE</span>
@@ -1443,118 +1428,95 @@ export class MaskLabPanel {
       `;
     }
 
+    // 3. Update Section Navigator (left panel)
+    const navigatorList = this.gdsViewerEl.querySelector('[data-mask-section-list]');
+    const sectionCountEl = this.gdsViewerEl.querySelector('[data-mask-section-count]');
+    if (navigatorList && analysis.groups) {
+      navigatorList.innerHTML = analysis.groups.map((g, idx) => `
+        <button type="button" class="navigator-item" data-nav-item="${idx}" aria-pressed="false" style="--sec-color: ${g.color};">
+          <span class="nav-color-dot" style="background: ${g.color};"></span>
+          <div class="nav-info">
+            <strong>${g.number}. ${escapeHTML(g.name)}</strong>
+            <small>${escapeHTML(g.sub || '')}</small>
+          </div>
+          <span class="nav-area">${g.percentArea}% zone</span>
+        </button>
+      `).join('');
+      navigatorList.querySelectorAll('[data-nav-item]').forEach((el) => {
+        const idx = Number(el.dataset.navItem);
+        el.addEventListener('click', () => this.selectSection(idx));
+        el.addEventListener('pointerenter', () => this.selectSection(idx));
+      });
+    }
+    if (sectionCountEl && analysis.groups) {
+      sectionCountEl.textContent = `${analysis.groups.length} sections`;
+    }
+
     // 2. Update Sidebar (Layer Legend & Output Pins)
     const sidebarEl = this.gdsViewerEl.querySelector('[data-mask-gds-analysis-sidebar]');
     if (sidebarEl) {
-      const legendItems = (analysis.activeLayers.length ? analysis.activeLayers : [
-        { name: 'Metal 1 (M1)', role: 'horizontal routing', color: '#1966d2', shapes: 0 },
-        { name: 'Metal 2 (M2)', role: 'vertical routing', color: '#8a2be2', shapes: 0 },
-        { name: 'Polysilicon (Poly)', role: 'gates', color: '#e63946', shapes: 0 },
-        { name: 'Diffusion (Active)', role: 'transistors', color: '#2ecc71', shapes: 0 },
-        { name: 'Contact (VIA)', role: 'layer connection', color: '#f39c12', shapes: 0 },
-        { name: 'Well / N-Well / P-Well', role: 'device isolation', color: '#6c757d', shapes: 0 }
-      ]).map((l) => `
+      const legendItems = analysis.activeLayers.map((l) => `
         <li>
-          <span class="swatch" style="background:${l.color};"></span>
+          <span class="swatch" style="background:${escapeHTML(l.color)};"></span>
           <span class="label">
-            <strong>${l.name}</strong>
-            <small>${l.role || 'routing'} · ${l.shapes ? `${l.shapes.toLocaleString()} shapes` : 'active'}</small>
+            <strong>${escapeHTML(l.name)}</strong>
+            <small>${escapeHTML(l.role || 'unknown')} · ${l.shapes.toLocaleString()} shapes</small>
           </span>
         </li>
       `).join('');
 
       const outputItems = analysis.outputs.map((out, idx) => {
-        const isMsb = idx === 0;
-        const isLsb = idx === analysis.outputs.length - 1;
+        const bitMatch = out.name.match(/^Q(\d+)$/i);
+        const isMsb = analysis.isCounter && bitMatch && Number(bitMatch[1]) === Math.max(...analysis.outputs.map(({ name }) => Number(name.match(/^Q(\d+)$/i)?.[1] || 0)));
+        const isLsb = analysis.isCounter && bitMatch && Number(bitMatch[1]) === 0;
         return `
           <span class="output-item ${isMsb ? 'msb' : ''} ${isLsb ? 'lsb' : ''}">
-            <strong>${out.name}</strong>
-            <small>${isMsb ? '(MSB)' : isLsb ? '(LSB)' : `x:${out.xUm}µm`}</small>
+            <strong>${escapeHTML(out.name)}</strong>
+            <small>${isMsb ? '(MSB)' : isLsb ? '(LSB)' : `${escapeHTML(out.xUm)} µm`}</small>
           </span>
         `;
       }).join('');
 
-      // Keep the Section Inspector at the top of the sidebar
-      const inspectorExisting = sidebarEl.querySelector('[data-mask-section-inspector]');
-      sidebarEl.innerHTML = `
-        <div class="mask-analysis-panel mask-section-inspector-panel" data-mask-section-inspector>
-          <h3>Section Inspector</h3>
-          <p class="mask-inspector-hint">Select a section to inspect its physical properties.</p>
-        </div>
-        <div class="mask-analysis-panel mask-layer-legend-panel">
-          <h3>Layer Legend (${analysis.activeLayers.length} Layers)</h3>
-          <ul class="mask-layer-legend-list">${legendItems}</ul>
-        </div>
-        <div class="mask-analysis-panel mask-outputs-panel">
-          <h3>${analysis.isCounter ? '8-Bit Counter Outputs' : 'Chip I/O & Output Pins'}</h3>
-          <div class="mask-outputs-list">
-            <div class="mask-outputs-arrow" aria-hidden="true">
-              <svg viewBox="0 0 16 110" width="16" height="110">
-                <line x1="8" y1="105" x2="8" y2="8" stroke="#168bff" stroke-width="2.5" />
-                <polygon points="8,0 3,12 13,12" fill="#168bff" />
-              </svg>
-            </div>
-            <div class="mask-outputs-items">${outputItems}</div>
-          </div>
-        </div>
-      `;
+      sidebarEl.querySelector('.mask-layer-legend-panel h3').textContent = `Layer Legend (${analysis.activeLayers.length} Layers)`;
+      sidebarEl.querySelector('.mask-layer-legend-list').innerHTML = legendItems;
+      sidebarEl.querySelector('.mask-outputs-panel h3').textContent = analysis.isCounter ? '8-Bit Counter Outputs' : 'Detected Outputs';
+      sidebarEl.querySelector('.mask-outputs-items').innerHTML = outputItems || '<span class="output-item">No output labels found</span>';
     }
 
     // 3. Update Bottom Dashboard (Functional Blocks, Schematic, Notes)
     const dashboardEl = this.gdsViewerEl.querySelector('[data-mask-gds-analysis-dashboard]');
     if (dashboardEl) {
       const blocksHtml = analysis.groups.map((g, idx) => `
-        <div class="mask-block-item" data-section-card="${idx}" style="--block-color: ${g.color};">
-          <div class="mask-block-header">
-            <span class="badge">${g.number}</span>
-            <div>
-              <strong>${g.name}</strong>
-              ${g.sub ? `<small class="block-sub">${g.sub}</small>` : ''}
+        <button type="button" class="mask-section-card" data-section-card="${idx}" aria-pressed="false" style="--block-color: ${g.color};">
+          <div class="section-card-header">
+            <span class="card-badge">${g.number}</span>
+            <div class="card-title-group">
+              <strong>${escapeHTML(g.name)}</strong>
+              ${g.sub ? `<small class="card-sub">${escapeHTML(g.sub)}</small>` : ''}
             </div>
           </div>
-          <div class="mask-block-meta">
-            <span class="meta-tag">Area: ${g.boundsUm.area} µm² (${g.percentArea}%)</span>
-            <span class="meta-tag">Density: ${g.density} sh/µm²</span>
+          <div class="section-card-meta">
+            <span class="meta-tag">Zone area: ${g.boundsUm.area} µm² (${g.percentArea}% of die)</span>
+            <span class="meta-tag">${g.layers.length} intersecting layers</span>
           </div>
-          <ul>
-            ${g.bullets.map((b) => `<li>• ${b}</li>`).join('')}
+          <p class="section-card-definition">${escapeHTML(g.definition)}</p>
+          <ul class="section-card-bullets">
+            ${g.bullets.map((b) => `<li>${escapeHTML(b)}</li>`).join('')}
           </ul>
-        </div>
+        </button>
       `).join('');
 
-      // Build Dynamic Architecture Diagram matching the identified chip type
       const schematicSvg = this.buildArchitectureDiagramSvg(analysis);
-      const notesHtml = analysis.notes.map((n) => `<li>• ${n}</li>`).join('');
+      dashboardEl.querySelector('.mask-section-cards-grid').innerHTML = blocksHtml;
+      dashboardEl.querySelector('.mask-functional-section-cards .card-title-bar h3').textContent = `Functional Blocks (${analysis.cleanName})`;
+      dashboardEl.querySelector('.mask-logic-diagram-card .card-title-bar h3').textContent = `Simplified ${analysis.architecture} Logic Diagram`;
+      dashboardEl.querySelector('.mask-logic-diagram-card .card-title-bar small').textContent = 'Illustrative dataflow · not extracted from connectivity';
+      dashboardEl.querySelector('.mask-notes-card .card-title-bar h3').textContent = 'Notes & Limitations';
+      dashboardEl.querySelector('.mask-notes-card .card-title-bar small').textContent = 'GDS preview · not foundry signoff';
+      dashboardEl.querySelector('.mask-diagram-wrapper').innerHTML = schematicSvg;
+      dashboardEl.querySelector('[data-mask-analysis-notes]').innerHTML = analysis.notes
+        .map((note) => `<li>${escapeHTML(note)}</li>`).join('');
 
-      dashboardEl.innerHTML = `
-        <div class="mask-dashboard-card mask-functional-blocks-card">
-          <div class="card-title-bar">
-            <h3>Functional Blocks (${analysis.cleanName})</h3>
-            <small>Interactive · Click any section to inspect</small>
-          </div>
-          <div class="mask-blocks-grid">${blocksHtml}</div>
-        </div>
-
-        <div class="mask-dashboard-card mask-logic-diagram-card">
-          <div class="card-title-bar">
-            <h3>${analysis.architecture} – Architecture Diagram</h3>
-            <small>Synchronous Dataflow</small>
-          </div>
-          <div class="mask-diagram-wrapper">
-            ${schematicSvg}
-          </div>
-        </div>
-
-        <div class="mask-dashboard-card mask-notes-card">
-          <div class="card-title-bar">
-            <h3>Physical Verification &amp; Engineering Notes</h3>
-            <small>PDK Layout Signoff Telemetry</small>
-          </div>
-          <ul>${notesHtml}</ul>
-        </div>
-      `;
-
-      // Bind interactive click and hover listeners to block cards
       dashboardEl.querySelectorAll('[data-section-card]').forEach((card) => {
         const idx = Number(card.dataset.sectionCard);
         card.addEventListener('click', () => this.selectSection(idx));
@@ -1666,14 +1628,16 @@ export class MaskLabPanel {
   // ─────────────────────────────────────────────────────────────────────────
   // buildFunctionalGroups
   // Constructs the complete SVG grouping overlay in upright SVG user space:
-  // - True physical bounding boxes computed from actual layer coordinates
+  // - Zone boxes mapped into physical layout coordinates
   // - Left callout badges with angled vector pointer lines straight to section edges
   // - Top output pin indicator arrows placed at real pin coordinates
   // - Bottom-right coordinate axes (X right, Y up)
   // - Interactive hover and click handlers that trigger selectSection()
   // ─────────────────────────────────────────────────────────────────────────
   buildFunctionalGroups(analysis, preview, svgNamespace) {
-    const { bounds, width: svgW, height: svgH } = preview;
+    const { bounds } = preview;
+    const svgW = Math.max(preview.width, 1);
+    const svgH = Math.max(preview.height, 1);
     const minX = bounds.minX;
     const maxX = bounds.maxX;
     const minY = bounds.minY;
@@ -1695,9 +1659,12 @@ export class MaskLabPanel {
     // is rendered with top at -maxY and height = maxY - minY.
     rowSpecs.forEach((spec, idx) => {
       const groupEl = document.createElementNS(svgNamespace, 'g');
-      groupEl.className = 'mask-gds-section-group';
+      groupEl.setAttribute('class', 'mask-gds-section-group');
       groupEl.dataset.sectionIndex = String(idx);
       groupEl.style.setProperty('--sec-color', spec.color);
+      groupEl.setAttribute('role', 'button');
+      groupEl.setAttribute('tabindex', '0');
+      groupEl.setAttribute('aria-label', `Select section ${spec.number}: ${spec.name}`);
 
       const secMinX = spec.bounds.minX;
       const secMaxX = spec.bounds.maxX;
@@ -1717,7 +1684,7 @@ export class MaskLabPanel {
         ];
         tiers.forEach((tier) => {
           const tierRect = document.createElementNS(svgNamespace, 'rect');
-          tierRect.className = 'mask-gds-section-rect';
+          tierRect.setAttribute('class', 'mask-gds-section-rect');
           tierRect.setAttribute('x', String(rx + rw * tier.xOff));
           tierRect.setAttribute('y', String(ry + tier.yOff));
           tierRect.setAttribute('width', String(rw * tier.w));
@@ -1732,7 +1699,7 @@ export class MaskLabPanel {
       } else if (spec.hasSteppedTab) {
         const mainH = rh * 0.78;
         const mainRect = document.createElementNS(svgNamespace, 'rect');
-        mainRect.className = 'mask-gds-section-rect';
+        mainRect.setAttribute('class', 'mask-gds-section-rect');
         mainRect.setAttribute('x', String(rx));
         mainRect.setAttribute('y', String(ry));
         mainRect.setAttribute('width', String(rw));
@@ -1749,7 +1716,7 @@ export class MaskLabPanel {
         const tabW = rw * 0.24;
         const tabH = rh * 0.22;
         const tabRect = document.createElementNS(svgNamespace, 'rect');
-        tabRect.className = 'mask-gds-section-rect';
+        tabRect.setAttribute('class', 'mask-gds-section-rect');
         tabRect.setAttribute('x', String(tabX));
         tabRect.setAttribute('y', String(tabY));
         tabRect.setAttribute('width', String(tabW));
@@ -1762,7 +1729,7 @@ export class MaskLabPanel {
         groupEl.appendChild(tabRect);
       } else {
         const rect = document.createElementNS(svgNamespace, 'rect');
-        rect.className = 'mask-gds-section-rect';
+        rect.setAttribute('class', 'mask-gds-section-rect');
         rect.setAttribute('x', String(rx));
         rect.setAttribute('y', String(ry));
         rect.setAttribute('width', String(rw));
@@ -1846,7 +1813,7 @@ export class MaskLabPanel {
 
       // Callout box
       const boxRect = document.createElementNS(svgNamespace, 'rect');
-      boxRect.className = 'mask-callout-badge';
+      boxRect.setAttribute('class', 'mask-callout-badge');
       boxRect.setAttribute('x', String(calloutLeftX));
       boxRect.setAttribute('y', String(calloutTopSvgY));
       boxRect.setAttribute('width', String(calloutW));
@@ -1894,6 +1861,11 @@ export class MaskLabPanel {
       // Interactive click and hover listeners
       groupEl.addEventListener('click', () => this.selectSection(idx));
       groupEl.addEventListener('pointerenter', () => this.selectSection(idx));
+      groupEl.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        this.selectSection(idx);
+      });
       regions.appendChild(groupEl);
     });
 

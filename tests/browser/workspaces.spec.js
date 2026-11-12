@@ -329,6 +329,18 @@ test('Chip View sends actual GDS layers to the vector viewer in Mask Lab', async
   await expect(viewer.locator('[data-mask-gds-svg] path').first()).toBeAttached();
   await expect(viewer.locator('[data-mask-gds-summary]')).toContainText('layered-demo.gds');
 
+  const groupingToggle = viewer.locator('[data-mask-gds-grouping]');
+  const groupingOverlay = viewer.locator('[data-gds-functional-groups]');
+  await expect(groupingToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(viewer.locator('.mask-gds-section-group')).toHaveCount(6);
+  await groupingToggle.click();
+  await expect(groupingToggle).toHaveAttribute('aria-pressed', 'false');
+  await expect(groupingOverlay).toBeHidden();
+  await expect(viewer.locator('.mask-gds-analysis-dashboard')).toBeHidden();
+  await groupingToggle.click();
+  await expect(groupingToggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(groupingOverlay).toBeVisible();
+
   const firstLayer = viewer.locator('[data-mask-gds-layer-toggle]').first();
   const layerId = await firstLayer.getAttribute('data-mask-gds-layer-toggle');
   await firstLayer.click();
