@@ -247,6 +247,45 @@ test('flattening places referenced cells instead of stacking them at the origin'
   assert.ok(Math.max(...xs) > 5000, 'the second copy is placed, not left at the origin');
 });
 
+test('flattening spaces AREF arrays by their declared row and column counts', () => {
+  const parsed = { structures: [
+    { name: 'TOP', elements: [{
+      type: 'AREF', sname: 'CELL', cols: 4, rows: 3,
+      points: [[100, 200], [500, 200], [100, 800]]
+    }] },
+    { name: 'CELL', elements: [{
+      type: 'BOUNDARY', layer: 1, datatype: 0,
+      points: [[0, 0], [10, 0], [10, 10], [0, 10]]
+    }] }
+  ] };
+
+  const flat = flattenStructure(parsed);
+  assert.equal(flat.instances.length, 12);
+  assert.deepEqual([...new Set(flat.instances.map(({ x }) => x))], [100, 200, 300, 400]);
+  assert.deepEqual([...new Set(flat.instances.map(({ y }) => y))], [200, 400, 600]);
+  assert.ok(flat.instances.at(-1).x < 500);
+  assert.ok(flat.instances.at(-1).y < 800);
+});
+
+test('flattening samples huge AREF arrays across their full placement span', () => {
+  const parsed = { structures: [
+    { name: 'TOP', elements: [{
+      type: 'AREF', sname: 'CELL', cols: 1000000, rows: 1,
+      points: [[0, 0], [1000000, 0], [0, 1]]
+    }] },
+    { name: 'CELL', elements: [{
+      type: 'BOUNDARY', layer: 1, datatype: 0,
+      points: [[0, 0], [10, 0], [10, 10], [0, 10]]
+    }] }
+  ] };
+
+  const flat = flattenStructure(parsed, null, { maxInstances: 10 });
+  assert.equal(flat.instances.length, 10);
+  assert.equal(flat.truncatedAt, 10);
+  assert.ok(flat.instances[0].x > 0);
+  assert.ok(flat.instances.at(-1).x > 900000);
+});
+
 test('flattening keeps top geometry and prioritizes functional cells over filler references', () => {
   const box = (x) => ({ type: 'BOUNDARY', layer: 68, datatype: 20, points: [[x, 0], [x + 10, 0], [x + 10, 10], [x, 0]] });
   const ref = (sname, x) => ({ type: 'SREF', sname, points: [[x, 0]] });

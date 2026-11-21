@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { DEFAULT_STACK_GAP, buildGdsModel, stackLayers } from '../utils/GdsSceneBuilder.js';
+import { buildGdsVectorPreview } from '../utils/GdsVectorPreview.js';
+import { MaskLabPanel } from './MaskLabPanel.js';
 import { getFileExtension, isGdsFileName, isGltfFileName } from '../utils/GdsParser.js';
 
 // Chip View is an Atom Lab clone kept read-only: files are imported for
@@ -63,6 +65,12 @@ export class ChipViewPanel {
       if (bulk) {
         const id = Number(bulk.closest('[data-chipview-model]').dataset.chipviewModel);
         this.setAllLayersVisible(id, bulk.dataset.chipviewLayersAction === 'show');
+        return;
+      }
+      const section = event.target.closest('[data-chipview-section]');
+      if (section) {
+        const model = this.modelFromEvent(event);
+        if (model) this.focusFunctionalSection(model, Number(section.dataset.chipviewSection));
         return;
       }
       const layerToggle = event.target.closest('[data-chipview-layer]');
@@ -135,6 +143,13 @@ export class ChipViewPanel {
 
   applyStack(model) {
     stackLayers(model.object, { stacked: model.stack.stacked, gap: model.stack.gap });
+    const functionalSections = model.object.children.find((child) => child.userData.chipViewFunctionalSections);
+    if (functionalSections) {
+      const layerTop = model.object.children
+        .filter((child) => child.userData.chipViewLayer !== undefined)
+        .reduce((top, mesh) => Math.max(top, mesh.position.y + mesh.userData.chipViewBaseThickness * mesh.scale.y), 0);
+      functionalSections.position.y = layerTop - functionalSections.userData.chipViewBaseY;
+    }
     this.editor.sceneManager.render();
   }
 
@@ -213,15 +228,20 @@ export class ChipViewPanel {
         ? `${summary.widthMicrons.toFixed(1)} × ${summary.heightMicrons.toFixed(1)} µm`
         : `${summary.widthDbUnits.toLocaleString()} × ${summary.heightDbUnits.toLocaleString()} db units`;
       const warnings = [...summary.warnings];
+      let analysis = null;
+      try {
+        const preview = buildGdsVectorPreview(buffer);
+        analysis = MaskLabPanel.prototype.analyzeChipLayout.call({ sourceDesign: null }, preview, file.name);
+        this.addFunctionalSectionBounds(group, analysis, summary);
+      } catch (analysisError) {
+        warnings.push(`Layout analysis could not be completed: ${analysisError.message}`);
+      }
       if (summary.pdk === 'unknown') {
         const unnamed = summary.layerNames.filter((entry) => entry.startsWith('Layer ')).length;
         warnings.push(
           `This layout's PDK is not recognised, so ${unnamed} of its ${summary.layers} layers keep their numbers. ` +
           'Add that PDK\'s .lyp and re-run scripts/generate-layer-map.mjs to name them.'
         );
-      }
-      if (summary.truncated) {
-        warnings.push(`Only the first ${summary.polygons.toLocaleString()} drawable elements are rendered; ${summary.truncated.toLocaleString()} more were skipped.`);
       }
       if (summary.skippedMarkerLayers?.length) {
         const list = (reason) => summary.skippedMarkerLayers
@@ -250,6 +270,7 @@ export class ChipViewPanel {
         detail: `${summary.pdk && summary.pdk !== 'unknown' ? summary.pdk : 'PDK not recognised'} · ${summary.layers} layer(s) · ${shapeText} · ${sizeText}`,
         stack: { stacked: true, gap: summary.stackGap ?? DEFAULT_STACK_GAP },
         summary,
+        analysis,
         warnings
       });
       this.setStatus(`${file.name} imported for viewing.`);
@@ -308,7 +329,7 @@ export class ChipViewPanel {
     }
   }
 
-  addModel({ name, format, object, detail, urls = [], gdsBuffer = null, stack = { stacked: true, gap: DEFAULT_STACK_GAP }, summary = null, warnings = [] }) {
+  addModel({ name, format, object, detail, urls = [], gdsBuffer = null, stack = { stacked: true, gap: DEFAULT_STACK_GAP }, summary = null, analysis = null, warnings = [] }) {
     object.userData.chipViewModel = true;
     object.traverse((node) => {
       node.userData.chipViewModel = true;
@@ -318,12 +339,85 @@ export class ChipViewPanel {
       }
     });
 
-    const model = { id: this.nextId++, name, format, object, detail, urls, gdsBuffer, stack, summary, warnings };
+    const model = { id: this.nextId++, name, format, object, detail, urls, gdsBuffer, stack, summary, analysis, activeSection: -1, warnings };
     this.models.push(model);
     this.editor.sceneManager.addObject(object);
     this.renderModels();
     this.focusModel(model.id);
     return model;
+  }
+
+  addFunctionalSectionBounds(object, analysis, summary) {
+    if (!analysis?.groups?.length || !summary.widthDbUnits || !summary.heightDbUnits) return;
+    const span = 12;
+    const scale = span / Math.max(summary.widthDbUnits, summary.heightDbUnits);
+    const bounds = summary.layoutBounds ?? { minX: 0, minY: 0, maxX: summary.widthDbUnits, maxY: summary.heightDbUnits };
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+    const layerMeshes = object.children.filter((child) => child.userData.chipViewLayer !== undefined);
+    const stackTop = layerMeshes.reduce(
+      (top, layer) => Math.max(top, layer.position.y + layer.userData.chipViewBaseThickness * layer.scale.y),
+      0
+    );
+    const fallbackPalette = [0x44d7b6, 0x5bb7ff, 0xffbf5f, 0xb28cff, 0xff718b, 0x9bd66f];
+    const sections = new THREE.Group();
+    sections.name = 'Functional layout sections';
+    sections.userData.chipViewFunctionalSections = true;
+    sections.userData.chipViewBaseY = stackTop;
+    analysis.groups.forEach((section, index) => {
+      const candidates = section.instanceBoxes?.length ? section.instanceBoxes : [section.bounds];
+      candidates.filter(Boolean).forEach((bounds) => {
+        const left = (bounds.minX - centerX) * scale;
+        const right = (bounds.maxX - centerX) * scale;
+        const near = -(bounds.maxY - centerY) * scale;
+        const far = -(bounds.minY - centerY) * scale;
+        const box = new THREE.Box3(
+          new THREE.Vector3(left, stackTop + 0.04, near),
+          new THREE.Vector3(right, stackTop + 0.08, far)
+        );
+        const outline = new THREE.Box3Helper(box, new THREE.Color(section.color ?? fallbackPalette[index % fallbackPalette.length]));
+        outline.material.transparent = true;
+        outline.material.opacity = 0.9;
+        outline.material.depthTest = false;
+        outline.renderOrder = 10;
+        outline.userData.chipViewFunctionalSection = index;
+        outline.visible = false;
+        sections.add(outline);
+      });
+    });
+    object.add(sections);
+  }
+
+  focusFunctionalSection(model, index) {
+    const sections = model.analysis?.groups;
+    const target = sections?.[index];
+    if (!target?.bounds) return;
+    model.activeSection = model.activeSection === index ? -1 : index;
+    model.object.traverse((node) => {
+      if (node.userData.chipViewFunctionalSection === undefined) return;
+      node.visible = node.userData.chipViewFunctionalSection === model.activeSection;
+    });
+    const scale = 12 / Math.max(model.summary.widthDbUnits, model.summary.heightDbUnits);
+    const layoutBounds = model.summary.layoutBounds ?? { minX: 0, minY: 0, maxX: model.summary.widthDbUnits, maxY: model.summary.heightDbUnits };
+    const x = ((target.bounds.minX + target.bounds.maxX) / 2 - (layoutBounds.minX + layoutBounds.maxX) / 2) * scale;
+    const z = -((target.bounds.minY + target.bounds.maxY) / 2 - (layoutBounds.minY + layoutBounds.maxY) / 2) * scale;
+    const layers = model.object.children.filter((child) => child.userData.chipViewLayer !== undefined);
+    const stackBottom = layers.length ? Math.min(...layers.map((layer) => layer.position.y)) : 0;
+    const stackTop = layers.length
+      ? Math.max(...layers.map((layer) => layer.position.y + layer.userData.chipViewBaseThickness * layer.scale.y))
+      : 0;
+    const center = new THREE.Vector3(x, (stackBottom + stackTop) / 2, z);
+    const distance = Math.max(
+      (target.bounds.maxX - target.bounds.minX) * scale,
+      (target.bounds.maxY - target.bounds.minY) * scale,
+      stackTop - stackBottom,
+      1
+    ) * 2.2;
+    const direction = new THREE.Vector3().copy(this.editor.sceneManager.activeCamera.position)
+      .sub(this.editor.navigation.target).normalize();
+    this.editor.navigation.animateTo(center.clone().addScaledVector(direction, distance), center);
+    this.renderModels();
+    this.editor.sceneManager.render();
   }
 
   focusModel(id) {
@@ -366,7 +460,7 @@ export class ChipViewPanel {
     const [model] = this.models.splice(index, 1);
     this.editor.sceneManager.removeObject(model.object);
     model.object.traverse((node) => {
-      if (node.isMesh) {
+      if (node.isMesh || node.isLineSegments) {
         node.geometry?.dispose?.();
         const materials = Array.isArray(node.material) ? node.material : [node.material];
         materials.forEach((material) => material?.dispose?.());
@@ -397,6 +491,12 @@ export class ChipViewPanel {
       row.className = 'chip-view-model';
       row.dataset.chipviewModel = String(model.id);
       const layers = this.layerRows(model);
+      const sections = model.analysis?.groups ?? [];
+      const sectionList = sections.map((section, index) => `
+        <button type="button" class="chip-view-section ${model.activeSection === index ? 'active' : ''}" data-chipview-section="${index}" aria-pressed="${model.activeSection === index}" title="Select to highlight and focus · ${section.boundsSource}; ${section.instanceCount} cell-name matches">
+          <span class="chip-view-section-swatch" style="background:${section.color || '#9eacc0'}"></span>
+          <span><strong>${index + 1}. ${section.name}</strong><small>${section.instanceCount ? `${section.placedInstanceCount} placed cell bounds` : 'approximate coordinate region'} · ${section.percentArea}% area</small></span>
+        </button>`).join('');
       const layerList = layers.map(({ mesh, layer, datatype }) => {
         const coverage = mesh.userData.chipViewCoverage ?? 0;
         const fullArea = mesh.userData.chipViewFullArea;
@@ -404,7 +504,7 @@ export class ChipViewPanel {
         const swatch = `#${mesh.material.color.getHexString()}`;
         return `
           <button type="button" class="chip-view-layer" data-chipview-layer="${mesh.name}"
-                  aria-pressed="${mesh.visible}" title="${layerName} (${layer}/${datatype}) · ${mesh.userData.chipViewElements} elements · ${Math.min(coverage * 100, 999).toFixed(0)}% of the drawing${fullArea ? ' · full-area fill or plate' : ''}">
+                  aria-pressed="${mesh.visible}" title="${layerName} (${layer}/${datatype}) · ${mesh.userData.chipViewSampledElements.toLocaleString()} shown of ${mesh.userData.chipViewElements.toLocaleString()} shapes · estimated ${Math.min(coverage * 100, 999).toFixed(0)}% of the drawing${fullArea ? ' · full-area fill or plate' : ''}">
             <span class="chip-view-layer-swatch" style="background:${swatch}"></span>
             <span>${layerName}</span>
             ${fullArea ? '<em>fill</em>' : ''}
@@ -416,6 +516,7 @@ export class ChipViewPanel {
           <span>${model.format}</span>
           <span>${model.detail}</span>
         </div>
+        ${model.analysis ? `<div class="chip-view-analysis"><strong>${model.analysis.architecture}</strong><span>${model.analysis.widthUm.toFixed(1)} × ${model.analysis.heightUm.toFixed(1)} µm · ${model.analysis.pdkLabel} · ${model.analysis.totalShapes.toLocaleString()} expanded shapes${model.analysis.renderedShapes < model.analysis.totalShapes ? ` · ${model.analysis.renderedShapes.toLocaleString()} sampled` : ''}${model.analysis.instanceLimitReached ? ` · ${model.analysis.instanceCount.toLocaleString()} instance cap` : ''}</span><div class="chip-view-section-list">${sectionList}</div><small>Matched groups outline individual cell placements. Unmatched groups show approximate coordinate zones; neither proves connectivity.</small></div>` : ''}
         <div class="chip-view-model-actions">
           <button type="button" data-chipview-model-action="focus">Focus</button>
           ${model.gdsBuffer ? '<button type="button" data-chipview-model-action="open-mask">Open layers in Mask Lab</button>' : ''}

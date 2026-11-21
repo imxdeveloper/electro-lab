@@ -123,6 +123,7 @@ test('buildGdsModel caps oversized layouts and reports the overflow', () => {
 
   assert.equal(summary.polygons, 1);
   assert.equal(summary.truncated, 2);
+  assert.match(summary.warnings.join(' '), /representative sample/);
   assert.ok(group.children.length >= 1);
 });
 

@@ -792,6 +792,16 @@ button, input, select {
 .chip-view-layer:hover { background: #2b4663; }
 .chip-view-layer-swatch { width: 9px; height: 9px; flex: 0 0 auto; border-radius: 2px; }
 .chip-view-layer em { color: #ffcf7a; font-size: 9px; font-style: normal; }
+.chip-view-analysis { grid-column: 1 / -1; display: grid; gap: 5px; padding-top: 8px; border-top: 1px solid #2a3849; }
+.chip-view-analysis > strong { color: #b7f7d0; font-size: 11px; }
+.chip-view-analysis > span, .chip-view-analysis > small { color: #9eacc0; font-size: 9.5px; line-height: 1.4; }
+.chip-view-section-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 4px; max-height: 190px; overflow: auto; }
+.chip-view-section { display: flex; gap: 6px; align-items: flex-start; padding: 5px; border: 1px solid #344358; border-radius: 5px; background: #1a2532; color: #c8d4e2; cursor: pointer; text-align: left; }
+.chip-view-section:hover, .chip-view-section.active { border-color: #66b5ff; background: #23374c; }
+.chip-view-section-swatch { width: 8px; height: 8px; flex: 0 0 auto; margin-top: 2px; border-radius: 2px; }
+.chip-view-section strong, .chip-view-section small { display: block; }
+.chip-view-section strong { font-size: 9.5px; }
+.chip-view-section small { margin-top: 2px; color: #9eacc0; font-size: 8.5px; line-height: 1.35; }
 .chip-view-model-warning { grid-column: 1 / -1; margin: 7px 0 0; color: #ffcf7a; font-size: 9.5px; line-height: 1.45; }
 .chip-view-panel footer { padding: 8px 12px; border-top: 1px solid #344358; color: #a9c8e4; font-size: 10.5px; line-height: 1.45; }
 .chip-view-panel footer.chip-view-status-error { color: #ffb4a2; }

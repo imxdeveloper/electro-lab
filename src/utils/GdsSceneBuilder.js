@@ -4,6 +4,7 @@ import { flattenStructure, parseGdsii } from './GdsParser.js';
 import { describeLayer, detectPdk } from '../data/PdkLayerMaps.js';
 import { createLabel } from './LabelSprites.js';
 import { extractTransistors } from './GdsTransistors.js';
+import { sampleGdsElementsByLayer } from './GdsSampling.js';
 
 // GDSII is a 2D database format. Chip View extrudes the polygons it can read so
 // a layout can be inspected in 3D; it is a preview, not a physical model.
@@ -207,10 +208,15 @@ export function buildGdsModel(buffer, options = {}) {
     drawable.push(element);
   }
 
-  const rendered = drawable.slice(0, maxElements);
+  const rendered = sampleGdsElementsByLayer(drawable, maxElements);
   const truncated = drawable.length - rendered.length;
 
-  const box = boundsOfElements(rendered) ?? parsed.boundingBox ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  const box = boundsOfElements(drawable) ?? parsed.boundingBox ?? { minX: 0, minY: 0, maxX: 1, maxY: 1 };
+  const drawableCountsByLayer = new Map();
+  for (const element of drawable) {
+    const key = `${element.layer}/${element.datatype}`;
+    drawableCountsByLayer.set(key, (drawableCountsByLayer.get(key) ?? 0) + 1);
+  }
   const width = Math.max(box.maxX - box.minX, 1);
   const height = Math.max(box.maxY - box.minY, 1);
   const scale = targetSpan / Math.max(width, height);
@@ -295,12 +301,15 @@ export function buildGdsModel(buffer, options = {}) {
     mesh.userData.chipViewLayerName = layerInfo.name;
     mesh.userData.chipViewLayerRole = layerInfo.role;
     mesh.userData.chipViewLayerKnown = layerInfo.known;
-    mesh.userData.chipViewElements = bucket.elements;
+    const drawableElements = drawableCountsByLayer.get(`${bucket.layer}/${bucket.datatype}`) ?? bucket.elements;
+    mesh.userData.chipViewElements = drawableElements;
+    mesh.userData.chipViewSampledElements = bucket.elements;
+    mesh.userData.chipViewDrawableElements = drawableElements;
     mesh.userData.chipViewStackIndex = layerIndex;
     mesh.userData.chipViewBaseThickness = thickness;
     // A layer that covers nearly the whole drawing is fill artwork and hides
     // everything underneath it, so Chip View labels it for quick hiding.
-    mesh.userData.chipViewCoverage = bucket.area / drawArea;
+    mesh.userData.chipViewCoverage = (bucket.area * drawableElements / Math.max(bucket.elements, 1)) / drawArea;
     mesh.userData.chipViewFullArea = mesh.userData.chipViewCoverage > 0.75;
     group.add(mesh);
     layerIndex += 1;
@@ -396,6 +405,12 @@ export function buildGdsModel(buffer, options = {}) {
   const micronPerDbUnit = parsed.units.micronPerDbUnit;
   const databaseUnitNm = parsed.units.micronPerDbUnit * 1000;
   const warnings = [...parsed.warnings];
+  if (truncated > 0) {
+    warnings.push(`The 3D scene shows a representative sample of ${rendered.length.toLocaleString()} of ${drawable.length.toLocaleString()} drawable shapes, balanced across layers.`);
+  }
+  if (flat.truncatedAt !== null) {
+    warnings.push(`Hierarchy expansion stopped at ${flat.truncatedAt.toLocaleString()} placed instances; the 3D scene may omit later cells.`);
+  }
   // OpenLane-era layouts sometimes carry a UNITS record whose database unit is
   // far too small for silicon artwork. The 3D view is normalized, so it is not
   // affected, but the physical readout has to say so rather than print 0.0 um.
@@ -422,6 +437,7 @@ export function buildGdsModel(buffer, options = {}) {
     truncated,
     widthDbUnits: Math.round(width),
     heightDbUnits: Math.round(height),
+    layoutBounds: { minX: box.minX, minY: box.minY, maxX: box.maxX, maxY: box.maxY },
     widthMicrons: width * micronPerDbUnit,
     heightMicrons: height * micronPerDbUnit,
     databaseUnitNm,

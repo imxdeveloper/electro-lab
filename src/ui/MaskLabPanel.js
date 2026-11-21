@@ -899,7 +899,10 @@ export class MaskLabPanel {
     this.gdsViewerEl.hidden = false;
     this.el.classList.add('gds-view-mode');
     const units = `${Math.round(preview.width).toLocaleString()} × ${Math.round(preview.height).toLocaleString()} database units`;
-    this.gdsSummaryEl.textContent = `${fileName} · ${preview.pdk} · ${preview.layers.length} layer(s) · ${preview.renderedShapes.toLocaleString()} shapes · ${units}`;
+    const shapeLabel = preview.drawableShapes > preview.renderedShapes
+      ? `${preview.drawableShapes.toLocaleString()} shapes · ${preview.renderedShapes.toLocaleString()} sampled`
+      : `${preview.renderedShapes.toLocaleString()} shapes`;
+    this.gdsSummaryEl.textContent = `${fileName} · ${preview.pdk} · ${preview.layers.length} layer(s) · ${shapeLabel} · ${units}`;
     const metaEl = this.gdsViewerEl.querySelector('[data-mask-gds-chip-meta]');
     if (metaEl) {
       const clean = fileName.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').replace(/\b([a-z])/g, (_, c) => c.toUpperCase()).trim();
@@ -1403,7 +1406,7 @@ export class MaskLabPanel {
       `Design: ${cleanName} · Architecture: ${architecture}.`,
       `Technology: ${pdkLabel} · Grid: ${dbuNm.toFixed(1)} nm/dbu (${scaleUm.toFixed(3)} µm/unit).`,
       `Die Dimensions: ${widthUm.toFixed(1)} µm × ${heightUm.toFixed(1)} µm (Aspect Ratio ${aspectRatio}, Area ${dieAreaUm2.toFixed(1)} µm² / ${dieAreaMm2.toFixed(4)} mm²).`,
-      `Layer Count: ${activeLayers.length} active layers · Rendered Shapes: ${preview.renderedShapes.toLocaleString()} (${(preview.renderedShapes / dieAreaUm2).toFixed(2)} shapes/µm²).`,
+      `Layer Count: ${activeLayers.length} active layers · Expanded Shapes: ${(preview.drawableShapes ?? preview.renderedShapes).toLocaleString()} (${((preview.drawableShapes ?? preview.renderedShapes) / dieAreaUm2).toFixed(2)} shapes/µm²) · Preview Sample: ${preview.renderedShapes.toLocaleString()}.`,
       detectedClocks.length ? `Clock labels: ${detectedClocks.join(', ')}.` : 'No clock label was identified in GDS text.',
       detectedPower.length ? `Power labels: ${detectedPower.join(', ')}.` : 'No power label was identified in GDS text.',
       'Colored regions are visual layout zones based on die coordinates; they are not extracted functional blocks.',
@@ -1428,7 +1431,10 @@ export class MaskLabPanel {
       dieAreaUm2,
       dieAreaMm2,
       aspectRatio,
-      totalShapes: preview.renderedShapes,
+      totalShapes: preview.drawableShapes ?? preview.renderedShapes,
+      renderedShapes: preview.renderedShapes,
+      instanceCount: preview.instanceCount,
+      instanceLimitReached: preview.instanceLimitReached,
       outputs,
       outputsInferred: gdsOutputCount === 0,
       detectedInputs,

@@ -410,6 +410,7 @@ export function flattenStructure(parsed, topName = null, options = {}) {
   const instances = [];
   const texts = [];
   const queue = [{ structure: top, transform: IDENTITY_TRANSFORM, path: top.name, instanceId: null, chain: [top.name] }];
+  let queueIndex = 0;
   const boundsCache = new Map();
   let truncatedAt = null;
 
@@ -424,8 +425,8 @@ export function flattenStructure(parsed, topName = null, options = {}) {
     else elements.push(moved);
   };
 
-  while (queue.length) {
-    const { structure, transform, path, instanceId, chain } = queue.shift();
+  while (queueIndex < queue.length) {
+    const { structure, transform, path, instanceId, chain } = queue[queueIndex++];
 
     // Preserve geometry from this structure even when a large top-level
     // reference list (for example OpenLane filler cells) reaches the cap.
@@ -441,12 +442,14 @@ export function flattenStructure(parsed, topName = null, options = {}) {
         // Skip only genuine cycles; the same cell placed many times is normal.
         if (!child || chain.includes(child.name)) continue;
         const origin = element.points[0] ?? [0, 0];
-        const placements = element.type === 'AREF' ? arrayPlacements(element) : [[0, 0]];
+        const totalPlacements = element.type === 'AREF'
+          ? Math.max(1, element.cols ?? 1) * Math.max(1, element.rows ?? 1)
+          : 1;
+        const remainingCapacity = Math.max(0, maxInstances - instances.length);
+        const placementLimit = Math.min(totalPlacements, remainingCapacity);
+        if (placementLimit < totalPlacements) truncatedAt ??= instances.length + placementLimit;
+        const placements = arrayPlacements(element, placementLimit);
         for (const [offsetX, offsetY] of placements) {
-          if (instances.length >= maxInstances) {
-            truncatedAt ??= instances.length;
-            break;
-          }
           const childTransform = referenceTransform(element, origin[0], origin[1], offsetX, offsetY);
           const centre = applyTransform(childTransform, 0, 0);
           const localBounds = boundsCache.get(child.name) ?? structureBounds(child);
@@ -492,19 +495,29 @@ function referencePriority(element) {
   return /(?:fill|tap|decap)/i.test(element.sname ?? '') ? 1 : 0;
 }
 
-function arrayPlacements(element) {
+function* arrayPlacements(element, limit = Infinity) {
   const [origin, columnVector, rowVector] = element.points;
-  if (!columnVector || !rowVector) return [[0, 0]];
+  if (!columnVector || !rowVector) {
+    if (limit > 0) yield [0, 0];
+    return;
+  }
   const cols = Math.max(1, element.cols ?? 1);
   const rows = Math.max(1, element.rows ?? 1);
-  const placements = [];
-  for (let row = 0; row < rows; row += 1) {
-    for (let column = 0; column < cols; column += 1) {
-      placements.push([
-        (origin?.[0] ?? 0) + columnVector[0] * column + rowVector[0] * row,
-        (origin?.[1] ?? 0) + columnVector[1] * column + rowVector[1] * row
-      ]);
-    }
+  const originX = origin?.[0] ?? 0;
+  const originY = origin?.[1] ?? 0;
+  const columnX = columnVector[0] - originX;
+  const columnY = columnVector[1] - originY;
+  const rowX = rowVector[0] - originX;
+  const rowY = rowVector[1] - originY;
+  const total = cols * rows;
+  const count = Math.min(total, limit);
+  for (let sample = 0; sample < count; sample += 1) {
+    const flatIndex = count < total ? Math.floor(((sample + 0.5) * total) / count) : sample;
+    const row = Math.floor(flatIndex / cols);
+    const column = flatIndex % cols;
+    yield [
+      (columnX * column) / cols + (rowX * row) / rows,
+      (columnY * column) / cols + (rowY * row) / rows
+    ];
   }
-  return placements;
 }

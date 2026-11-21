@@ -178,6 +178,13 @@ test('the Add menu opens Chip View, which imports a GDS layout for viewing only'
   await expect(model).toContainText('GDSII');
   await expect(model).toContainText('3 layer(s)');
   await expect(page.locator('[data-chipview-status]')).toContainText('imported for viewing');
+  await expect(model.locator('.chip-view-analysis')).toContainText('Standard-Cell ASIC Core');
+  const sections = model.locator('[data-chipview-section]');
+  await expect(sections).toHaveCount(6);
+  await expect(sections.first()).toHaveAttribute('aria-pressed', 'false');
+  await sections.first().click();
+  await expect(sections.first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(sections.first()).toHaveClass(/active/);
 
   // Chip View stays read-only: clicking the imported geometry selects nothing.
   const viewport = page.locator('.electroDesigner-viewport');

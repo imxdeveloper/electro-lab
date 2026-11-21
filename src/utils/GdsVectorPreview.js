@@ -1,5 +1,6 @@
 import { describeLayer, detectPdk } from '../data/PdkLayerMaps.js';
 import { flattenStructure, parseGdsii } from './GdsParser.js';
+import { sampleGdsElementsByLayer } from './GdsSampling.js';
 
 const MAX_SHAPES = 20000;
 
@@ -25,7 +26,7 @@ export function buildGdsVectorPreview(input, options = {}) {
   const pdk = detectPdk(parsed.layers);
   const flat = flattenStructure(parsed, null, { maxInstances: options.maxInstances ?? 20000 });
   const drawable = flat.elements.filter((element) => ['BOUNDARY', 'BOX', 'PATH'].includes(element.type));
-  const selected = drawable.slice(0, options.maxShapes ?? MAX_SHAPES);
+  const selected = sampleGdsElementsByLayer(drawable, options.maxShapes ?? MAX_SHAPES);
   const layerMap = new Map();
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
 
@@ -44,7 +45,8 @@ export function buildGdsVectorPreview(input, options = {}) {
         polygons: '',
         strokes: new Map(),
         shapes: 0,
-        // Per-layer tight bounding box accumulated from element points.
+        sampledShapes: 0,
+        // Full per-layer extent; path data below is only the render sample.
         bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
       };
       layerMap.set(key, layer);
@@ -56,6 +58,31 @@ export function buildGdsVectorPreview(input, options = {}) {
       layer.strokes.set(width, `${layer.strokes.get(width) || ''}${path}`);
     } else {
       layer.polygons += path;
+    }
+    layer.sampledShapes += 1;
+  }
+
+  // Dimensions and analysis zones use the full flattened layout, even when
+  // SVG paths are limited to a representative rendering sample.
+  for (const element of drawable) {
+    const key = `${element.layer}/${element.datatype}`;
+    let layer = layerMap.get(key);
+    if (!layer) {
+      const info = describeLayer(element.layer, element.datatype, pdk);
+      layer = {
+        id: key,
+        layer: element.layer,
+        datatype: element.datatype,
+        name: info.name,
+        role: info.role,
+        color: colorFor(element.layer),
+        polygons: '',
+        strokes: new Map(),
+        shapes: 0,
+        sampledShapes: 0,
+        bounds: { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity }
+      };
+      layerMap.set(key, layer);
     }
     layer.shapes += 1;
     for (const [x, y] of element.points) {
@@ -99,7 +126,7 @@ export function buildGdsVectorPreview(input, options = {}) {
     shapesTruncated: drawable.length > selected.length,
     warnings: [
       ...(flat.truncatedAt !== null ? [`Hierarchy expansion stopped at ${flat.truncatedAt.toLocaleString()} placed instances.`] : []),
-      ...(drawable.length > selected.length ? [`Showing ${selected.length.toLocaleString()} of ${drawable.length.toLocaleString()} flattened shapes.`] : [])
+      ...(drawable.length > selected.length ? [`Rendering a representative sample of ${selected.length.toLocaleString()} of ${drawable.length.toLocaleString()} flattened shapes, balanced across layers.`] : [])
     ]
   };
 }
